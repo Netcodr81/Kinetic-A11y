@@ -25,6 +25,7 @@ public sealed class AccessibilityScanner(
         try
         {
             var browser = await GetBrowserAsync(ct);
+            ct.ThrowIfCancellationRequested();
             await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
             {
                 UserAgent = "StatePdfDiscoveryMvp/1.0 (+contact administrator) axe-core"
@@ -32,6 +33,7 @@ public sealed class AccessibilityScanner(
             var page = await context.NewPageAsync();
             page.SetDefaultTimeout(_options.PageTimeoutSeconds * 1000f);
             await using var registration = ct.Register(() => _ = page.CloseAsync());
+            ct.ThrowIfCancellationRequested();
 
             var response = await page.GotoAsync(url.AbsoluteUri, new PageGotoOptions
             {
@@ -47,13 +49,33 @@ public sealed class AccessibilityScanner(
 
             var axe = await page.RunAxe(new AxeRunOptions
             {
-                RunOnly = new RunOnlyOptions { Type = "tag", Values = _options.Tags.ToList() }
+                // WCAG A/AA and accessibility best practices
+                RunOnly = RunOnlyOptions.Tags(_options.Tags.Append("best-practice").Distinct().ToArray()),
+
+                // Include accessibility violations and potential issues
+                ResultTypes = new HashSet<ResultType>
+                {
+                    ResultType.Violations,
+                    ResultType.Incomplete
+                },
+
+                // Element identification
+                Selectors = true,
+                Ancestry = true,
+                XPath = false,
+                AbsolutePaths = false,
+
+                // Scan behavior
+                Iframes = true,
+                RestoreScroll = true
             });
+            ct.ThrowIfCancellationRequested();
             Map(axe, result);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex)
         {
+            ct.ThrowIfCancellationRequested();
             logger.LogDebug(ex, "Accessibility scan failed for {Url}", url);
             result.Error = Truncate(ex.Message.Split('\n')[0], 2000);
         }
@@ -62,16 +84,21 @@ public sealed class AccessibilityScanner(
 
     private void Map(AxeResult axe, PageAccessibilityResult result)
     {
-        var violations = axe.Violations ?? [];
-        result.ViolationCount = violations.Length;
+        var allViolations = axe.Violations ?? [];
+        var violations = allViolations.Where(v => v.Tags.Any(t => t.StartsWith("wcag", StringComparison.Ordinal))).ToArray();
+        var bestPractices = allViolations.Where(v => !v.Tags.Any(t => t.StartsWith("wcag", StringComparison.Ordinal))).ToArray();
+        result.ViolationCount = violations.Select(v => v.Id).Distinct().Count();
         result.PassCount = axe.Passes?.Length ?? 0;
         result.IncompleteCount = axe.Incomplete?.Length ?? 0;
         result.CriticalCount = violations.Count(v => Is(v.Impact, "critical"));
         result.SeriousCount = violations.Count(v => Is(v.Impact, "serious"));
         result.ModerateCount = violations.Count(v => Is(v.Impact, "moderate"));
         result.MinorCount = violations.Count(v => Is(v.Impact, "minor"));
-        result.Score = AccessibilityScoring.Calculate(
-            violations.Select(v => ((string?)v.Impact, v.Nodes?.Length ?? 0)), _options.ScoreDecayConstant);
+        result.Score = AccessibilityScoring.Calculate(violations.Select(v => v.Id));
+        result.BestPracticesScore = AccessibilityScoring.Calculate(bestPractices.Select(v => v.Id));
+        result.QualityIssues.AddRange(allViolations.Select(v => new QualityIssue(
+            v.Tags.Any(t => t.StartsWith("wcag", StringComparison.Ordinal)) ? "Accessibility" : "Best Practices",
+            v.Id, v.Help, v.Nodes?.FirstOrDefault()?.Target?.ToString())));
 
         foreach (var v in violations
                      .OrderByDescending(v => AccessibilityScoring.ImpactWeight(v.Impact))

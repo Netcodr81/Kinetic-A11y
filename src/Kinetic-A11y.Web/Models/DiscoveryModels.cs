@@ -44,6 +44,10 @@ public sealed class PageAccessibilityResult
     public int IncompleteCount { get; set; }
     public string? Error { get; set; }
     public List<AccessibilityViolation> Violations { get; set; } = [];
+    [System.ComponentModel.DataAnnotations.Schema.NotMapped]
+    public int? BestPracticesScore { get; set; }
+    [System.ComponentModel.DataAnnotations.Schema.NotMapped]
+    public List<QualityIssue> QualityIssues { get; set; } = [];
 }
 
 public sealed class AccessibilityViolation

@@ -8,9 +8,17 @@ public sealed class DiscoveryDbContext(DbContextOptions<DiscoveryDbContext> opti
     public DbSet<DiscoveredPdf> DiscoveredPdfs => Set<DiscoveredPdf>();
     public DbSet<PageAccessibilityResult> PageAccessibilityResults => Set<PageAccessibilityResult>();
     public DbSet<AccessibilityViolation> AccessibilityViolations => Set<AccessibilityViolation>();
+    public DbSet<PageQualityResult> PageQualityResults => Set<PageQualityResult>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
+        modelBuilder.Entity<PageQualityResult>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.HasIndex(x => new { x.DiscoveryRunId, x.Url }).IsUnique();
+            b.HasOne(x => x.DiscoveryRun).WithMany().HasForeignKey(x => x.DiscoveryRunId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
         modelBuilder.Entity<DiscoveryRun>(b =>
         {
             b.HasKey(x => x.Id);
@@ -47,4 +55,22 @@ public sealed class DiscoveryDbContext(DbContextOptions<DiscoveryDbContext> opti
             b.Property(x => x.SampleHtml).HasMaxLength(1024);
         });
     }
+
+    public Task EnsureQualitySchemaAsync() => Database.ExecuteSqlRawAsync("""
+        CREATE TABLE IF NOT EXISTS "PageQualityResults" (
+            "Id" TEXT NOT NULL CONSTRAINT "PK_PageQualityResults" PRIMARY KEY,
+            "DiscoveryRunId" TEXT NOT NULL,
+            "Url" TEXT NOT NULL,
+            "AccessibilityEnabled" INTEGER NOT NULL,
+            "AccessibilityScore" INTEGER NULL,
+            "BestPracticesScore" INTEGER NULL,
+            "BrokenLinksScore" INTEGER NULL,
+            "SeoScore" INTEGER NULL,
+            "IssuesJson" TEXT NOT NULL,
+            "LinkCheckError" TEXT NULL,
+            FOREIGN KEY ("DiscoveryRunId") REFERENCES "DiscoveryRuns" ("Id") ON DELETE CASCADE
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS "IX_PageQualityResults_DiscoveryRunId_Url"
+            ON "PageQualityResults" ("DiscoveryRunId", "Url");
+        """);
 }

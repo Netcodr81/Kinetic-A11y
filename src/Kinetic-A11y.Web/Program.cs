@@ -23,7 +23,9 @@ builder.Services.Configure<CrawlerOptions>(builder.Configuration.GetSection("Cra
 builder.Services.Configure<AccessibilityOptions>(builder.Configuration.GetSection("Accessibility"));
 builder.Services.AddSingleton<AccessibilityScanner>();
 builder.Services.AddSingleton<DiscoveryQueue>();
+builder.Services.AddSingleton<DiscoveryRunControl>();
 builder.Services.AddScoped<WebsiteCrawler>();
+builder.Services.AddScoped<PageQualityScanner>();
 builder.Services.AddHostedService<DiscoveryWorker>();
 
 var app = builder.Build();
@@ -44,6 +46,7 @@ using (var scope = app.Services.CreateScope())
         await db.Database.EnsureDeletedAsync();
         await db.Database.EnsureCreatedAsync();
     }
+    await db.EnsureQualitySchemaAsync();
 }
 if (!app.Environment.IsDevelopment())
 {
@@ -70,10 +73,13 @@ app.MapGet("/runs/{runId:guid}/accessibility/export", async (Guid runId, IDbCont
     var pages = await db.PageAccessibilityResults.AsNoTracking().Include(x => x.Violations)
         .Where(x => x.DiscoveryRunId == runId).ToListAsync(ct);
     static string Csv(string? value) => "\"" + (value ?? "").Replace("\"", "\"\"") + "\"";
-    var lines = new List<string> { "PageUrl,Score,Critical,Serious,Moderate,Minor,PageError,RuleId,Impact,NodeCount,Help,HelpUrl,SampleTarget" };
+    var quality = await db.PageQualityResults.AsNoTracking().Where(x => x.DiscoveryRunId == runId)
+        .ToDictionaryAsync(x => x.Url, ct);
+    var lines = new List<string> { "PageUrl,Score,ScoringMethod,Critical,Serious,Moderate,Minor,PageError,RuleId,Impact,NodeCount,Help,HelpUrl,SampleTarget" };
     foreach (var page in pages.OrderBy(x => x.Score ?? -1).ThenBy(x => x.Url))
     {
-        var prefix = string.Join(",", Csv(page.Url), page.Score?.ToString() ?? "", page.CriticalCount, page.SeriousCount,
+        var prefix = string.Join(",", Csv(page.Url), page.Score?.ToString() ?? "",
+            Csv(quality.ContainsKey(page.Url) ? "DubBot-style" : "Legacy weighted"), page.CriticalCount, page.SeriousCount,
             page.ModerateCount, page.MinorCount, Csv(page.Error));
         if (page.Violations.Count == 0) { lines.Add(prefix + ",,,,,,"); continue; }
         lines.AddRange(page.Violations
@@ -81,6 +87,18 @@ app.MapGet("/runs/{runId:guid}/accessibility/export", async (Guid runId, IDbCont
             .Select(v => string.Join(",", prefix, Csv(v.RuleId), Csv(v.Impact), v.NodeCount, Csv(v.Help), Csv(v.HelpUrl), Csv(v.SampleTarget))));
     }
     return Results.File(System.Text.Encoding.UTF8.GetBytes(string.Join("\r\n", lines)), "text/csv", $"accessibility-{runId}.csv");
+});
+app.MapGet("/runs/{runId:guid}/quality/export", async (Guid runId, IDbContextFactory<DiscoveryDbContext> factory, CancellationToken ct) =>
+{
+    await using var db = await factory.CreateDbContextAsync(ct);
+    var pages = await db.PageQualityResults.AsNoTracking().Where(x => x.DiscoveryRunId == runId).ToListAsync(ct);
+    static string Csv(string? value) => "\"" + (value ?? "").Replace("\"", "\"\"") + "\"";
+    static string Number(double? value) => value?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) ?? "";
+    var lines = new List<string> { "PageUrl,OverallScore,AccessibilityScore,BrokenLinksScore,SeoScore,BestPracticesScore,LinkCheckError,IssuesJson" };
+    lines.AddRange(pages.OrderBy(x => x.Url).Select(x => string.Join(",", Csv(x.Url), Number(x.OverallScore),
+        Number(x.AccessibilityScore), Number(x.BrokenLinksScore), Number(x.SeoScore), Number(x.BestPracticesScore),
+        Csv(x.LinkCheckError), Csv(x.IssuesJson))));
+    return Results.File(System.Text.Encoding.UTF8.GetBytes(string.Join("\r\n", lines)), "text/csv", $"quality-{runId}.csv");
 });
 app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>()

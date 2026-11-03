@@ -1,11 +1,8 @@
-using Microsoft.EntityFrameworkCore;
-
-
 namespace Kinetic;
 
 public sealed class DiscoveryWorker(
     DiscoveryQueue queue,
-    IDbContextFactory<DiscoveryDbContext> dbFactory,
+    DiscoveryRunControl runControl,
     IServiceScopeFactory scopeFactory,
     ILogger<DiscoveryWorker> logger) : BackgroundService
 {
@@ -19,16 +16,9 @@ public sealed class DiscoveryWorker(
 
             try
             {
-                await using var db = await dbFactory.CreateDbContextAsync(stoppingToken);
-                var run = await db.DiscoveryRuns.SingleOrDefaultAsync(x => x.Id == id, stoppingToken);
-                if (run is null || run.Status != DiscoveryRunStatus.Queued) continue;
-                run.Status = DiscoveryRunStatus.Running;
-                run.StartedAt = DateTimeOffset.UtcNow;
-                await db.SaveChangesAsync(stoppingToken);
-
                 using var scope = scopeFactory.CreateScope();
                 var crawler = scope.ServiceProvider.GetRequiredService<WebsiteCrawler>();
-                await crawler.CrawlAsync(id, stoppingToken);
+                await runControl.ExecuteAsync(id, ct => crawler.CrawlAsync(id, ct), stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { break; }
             catch (Exception ex) { logger.LogError(ex, "Discovery run {RunId} failed", id); }

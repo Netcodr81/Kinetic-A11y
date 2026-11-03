@@ -16,7 +16,8 @@
         <div><label for="depth">Max crawl depth</label><input id="depth" type="number" @bind="maxDepth" min="0" max="20" /></div>
         <div><label for="pages">Max pages</label><input id="pages" type="number" @bind="maxPages" min="1" max="100000" /></div>
     </div>
-    <label class="checkbox"><input type="checkbox" @bind="scanAccessibility" /> Scan page accessibility (axe-core, WCAG 2.1 A/AA)</label>
+    <label class="checkbox"><input type="checkbox" @bind="scanAccessibility" /> Scan accessibility and Best Practices (axe-core, WCAG A/AA)</label>
+    <p class="muted">SEO and HTTP(S) link checks run on every crawled HTML page, including external links. Scoring follows DubBot's published formula; check coverage differs.</p>
     <button @onclick="StartAsync" disabled="@starting">@(starting ? "Starting..." : "Start discovery")</button>
     @if (!string.IsNullOrWhiteSpace(error)) { <p class="error">@error</p> }
 </div>
@@ -27,7 +28,7 @@ else if (runs.Count == 0) { <p class="muted">No discovery runs yet.</p> }
 else
 {
     <table>
-        <thead><tr><th>Website</th><th>Status</th><th>Pages</th><th>PDFs</th><th>A11y score</th><th>Created</th><th></th></tr></thead>
+        <thead><tr><th>Website</th><th>Status</th><th>Pages</th><th>PDFs</th><th>A11y score</th><th>Site score</th><th>Created</th><th></th></tr></thead>
         <tbody>
         @foreach (var run in runs)
         {
@@ -41,8 +42,10 @@ else
                     {
                         var score = run.AverageAccessibilityScore is { } avg ? (int?)Math.Round(avg) : null;
                         <span class="score score-@AccessibilityScoring.Band(score)">@(score?.ToString() ?? "—")</span>
+                        @if (!qualitySummaries.ContainsKey(run.Id)) { <span class="muted">Legacy</span> }
                     }
                 </td>
+                <td>@(qualitySummaries.TryGetValue(run.Id, out var summary) ? summary.Overall?.ToString("0.#") ?? "N/A" : "N/A")</td>
                 <td>@run.CreatedAt.ToLocalTime().ToString("g")</td>
                 <td><a href="/runs/@run.Id">View</a></td>
             </tr>
@@ -58,6 +61,7 @@ else
     private bool starting;
     private string? error;
     private List<DiscoveryRun>? runs;
+    private Dictionary<Guid, SiteQualitySummary> qualitySummaries = [];
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
@@ -67,6 +71,9 @@ else
         var storedRuns = await db.DiscoveryRuns.AsNoTracking().ToListAsync();
         // SQLite cannot order DateTimeOffset values; sort before applying the display limit.
         runs = storedRuns.OrderByDescending(x => x.CreatedAt).Take(50).ToList();
+        var ids = runs.Select(x => x.Id).ToList();
+        var quality = await db.PageQualityResults.AsNoTracking().Where(x => ids.Contains(x.DiscoveryRunId)).ToListAsync();
+        qualitySummaries = quality.GroupBy(x => x.DiscoveryRunId).ToDictionary(x => x.Key, x => new SiteQualitySummary(x));
     }
 
     private async Task StartAsync()

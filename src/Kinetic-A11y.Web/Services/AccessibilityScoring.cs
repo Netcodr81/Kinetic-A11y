@@ -11,14 +11,10 @@ public static class AccessibilityScoring
         _ => 1
     };
 
-    /// <summary>
-    /// Score = 100 * e^(-penalty / decay), where penalty is the sum of impact weight times affected node count.
-    /// </summary>
-    public static int Calculate(IEnumerable<(string? Impact, int NodeCount)> violations, double decayConstant)
+    public static int Calculate(IEnumerable<string> issueTypes)
     {
-        var penalty = violations.Sum(v => ImpactWeight(v.Impact) * Math.Max(1, v.NodeCount));
-        var decay = decayConstant > 0 ? decayConstant : 50;
-        return (int)Math.Round(100 * Math.Exp(-penalty / decay));
+        var count = issueTypes.Distinct(StringComparer.Ordinal).Take(20).Count();
+        return 100 - 5 * count;
     }
 
     public static string Band(int? score) => score switch

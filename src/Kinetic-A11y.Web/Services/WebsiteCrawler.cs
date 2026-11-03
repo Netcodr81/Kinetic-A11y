@@ -13,6 +13,7 @@ public sealed class WebsiteCrawler(
     IDbContextFactory<DiscoveryDbContext> dbFactory,
     IOptions<CrawlerOptions> options,
     AccessibilityScanner accessibilityScanner,
+    PageQualityScanner qualityScanner,
     ILogger<WebsiteCrawler> logger)
 {
     private readonly CrawlerOptions _options = options.Value;
@@ -37,57 +38,79 @@ public sealed class WebsiteCrawler(
         queue.Enqueue((root, 0));
         visited.Add(Normalize(root));
 
-        if (_options.CheckSitemaps)
-            await DiscoverSitemapsAsync(run, root, client, queue, pdfs, allowedHosts, ct);
-
-        while (queue.Count > 0 && visited.Count <= maxPages && !ct.IsCancellationRequested)
+        try
         {
-            var (url, depth) = queue.Dequeue();
-            if (depth > maxDepth) continue;
-            try
-            {
-                await Task.Delay(_options.DelayMilliseconds, ct);
-                using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
-                if (!response.IsSuccessStatusCode) { run.FailedRequests++; continue; }
-                var media = response.Content.Headers.ContentType?.MediaType;
-                if (media is not null && !media.Contains("html", StringComparison.OrdinalIgnoreCase)) continue;
-                var html = await response.Content.ReadAsStringAsync(ct);
-                run.PagesCrawled++;
+            if (_options.CheckSitemaps)
+                await DiscoverSitemapsAsync(run, root, client, queue, pdfs, allowedHosts, ct);
 
-                var parser = new HtmlParser();
-                var document = await parser.ParseDocumentAsync(html, ct);
-                foreach (var candidate in ExtractResourceUrls(document))
+            while (queue.Count > 0 && visited.Count <= maxPages && !ct.IsCancellationRequested)
+            {
+                var (url, depth) = queue.Dequeue();
+                if (depth > maxDepth) continue;
+                try
                 {
-                    if (!Uri.TryCreate(url, candidate, out var target)) continue;
-                    target = StripFragment(target);
-                    if (target.Scheme is not ("http" or "https")) continue;
-                    if (LooksLikePdf(target))
-                        await ValidateAndStoreAsync(run, target, url, client, pdfs, ct);
-                    else if (depth < maxDepth && allowedHosts.Contains(target.Host))
+                    await Task.Delay(_options.DelayMilliseconds, ct);
+                    using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+                    if (!response.IsSuccessStatusCode) { run.FailedRequests++; continue; }
+                    var media = response.Content.Headers.ContentType?.MediaType;
+                    if (media is not null && !media.Contains("html", StringComparison.OrdinalIgnoreCase)) continue;
+                    var html = await response.Content.ReadAsStringAsync(ct);
+                    run.PagesCrawled++;
+
+                    var parser = new HtmlParser();
+                    var document = await parser.ParseDocumentAsync(html, ct);
+                    foreach (var candidate in ExtractResourceUrls(document))
                     {
-                        var normalized = Normalize(target);
-                        if (visited.Add(normalized) && visited.Count <= maxPages)
+                        ct.ThrowIfCancellationRequested();
+                        if (!Uri.TryCreate(url, candidate, out var target)) continue;
+                        target = StripFragment(target);
+                        if (target.Scheme is not ("http" or "https")) continue;
+                        if (LooksLikePdf(target))
+                            await ValidateAndStoreAsync(run, target, url, client, pdfs, ct);
+                        else if (depth < maxDepth && allowedHosts.Contains(target.Host))
                         {
-                            queue.Enqueue((target, depth + 1));
-                            run.PagesDiscovered++;
+                            var normalized = Normalize(target);
+                            if (visited.Add(normalized) && visited.Count <= maxPages)
+                            {
+                                queue.Enqueue((target, depth + 1));
+                                run.PagesDiscovered++;
+                            }
                         }
                     }
+                    if (scannedPages.Add(Normalize(url)))
+                    {
+                        var quality = await qualityScanner.ScanAsync(run.Id, url, document, client,
+                            scanAccessibility, ct);
+                        quality.Url = Normalize(url);
+                        db.PageQualityResults.Add(quality);
+                        if (scanAccessibility)
+                        {
+                            var accessibility = await ScanAccessibilityAsync(db, run, url, ct);
+                            quality.AccessibilityScore = accessibility.Score;
+                            quality.BestPracticesScore = accessibility.BestPracticesScore;
+                            var issues = System.Text.Json.JsonSerializer.Deserialize<List<QualityIssue>>(quality.IssuesJson)
+                                ?? throw new InvalidOperationException("Invalid quality issues.");
+                            issues.AddRange(accessibility.QualityIssues);
+                            quality.IssuesJson = System.Text.Json.JsonSerializer.Serialize(issues);
+                        }
+                    }
+                    await db.SaveChangesAsync(ct);
                 }
-                if (scanAccessibility && scannedPages.Add(Normalize(url)))
-                    await ScanAccessibilityAsync(db, run, url, ct);
-                await db.SaveChangesAsync(ct);
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    run.FailedRequests++;
+                    logger.LogDebug(ex, "Failed crawling {Url}", url);
+                }
             }
-            catch (OperationCanceledException) { throw; }
-            catch (Exception ex)
-            {
-                run.FailedRequests++;
-                logger.LogDebug(ex, "Failed crawling {Url}", url);
-            }
-        }
 
-        run.Status = DiscoveryRunStatus.Completed;
-        run.CompletedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(ct);
+            ct.ThrowIfCancellationRequested();
+        }
+        finally
+        {
+            // Preserve partial progress even when the run's cancellation token is cancelled.
+            await db.SaveChangesAsync(CancellationToken.None);
+        }
     }
 
     private async Task DiscoverSitemapsAsync(DiscoveryRun run, Uri root, HttpClient client,
@@ -97,6 +120,7 @@ public sealed class WebsiteCrawler(
         var sitemapUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var candidate in candidates)
         {
+            ct.ThrowIfCancellationRequested();
             try
             {
                 var text = await client.GetStringAsync(candidate, ct);
@@ -111,7 +135,11 @@ public sealed class WebsiteCrawler(
                 }
                 else sitemapUrls.Add(candidate.AbsoluteUri);
             }
-            catch { /* Sitemaps and robots.txt are optional. */ }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Optional discovery file unavailable: {Url}", candidate);
+            }
         }
 
         var pending = new Queue<(Uri Url, int Depth)>();
@@ -121,6 +149,7 @@ public sealed class WebsiteCrawler(
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         while (pending.Count > 0 && seen.Count < 100)
         {
+            ct.ThrowIfCancellationRequested();
             var (uri, depth) = pending.Dequeue();
             if (!seen.Add(uri.AbsoluteUri)) continue;
             try
@@ -129,6 +158,7 @@ public sealed class WebsiteCrawler(
                 var doc = XDocument.Parse(xml);
                 foreach (var loc in doc.Descendants().Where(x => x.Name.LocalName == "loc").Select(x => x.Value.Trim()))
                 {
+                    ct.ThrowIfCancellationRequested();
                     if (!Uri.TryCreate(loc, UriKind.Absolute, out var item)) continue;
                     if (LooksLikePdf(item))
                     {
@@ -141,7 +171,11 @@ public sealed class WebsiteCrawler(
                         queue.Enqueue((item, 1));
                 }
             }
-            catch { /* Ignore malformed or unavailable sitemap documents. */ }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+            catch (Exception ex)
+            {
+                logger.LogDebug(ex, "Unable to process sitemap {Url}", uri);
+            }
         }
     }
 
@@ -208,7 +242,7 @@ public sealed class WebsiteCrawler(
         }
     }
 
-    private async Task ScanAccessibilityAsync(DiscoveryDbContext db, DiscoveryRun run, Uri url, CancellationToken ct)
+    private async Task<PageAccessibilityResult> ScanAccessibilityAsync(DiscoveryDbContext db, DiscoveryRun run, Uri url, CancellationToken ct)
     {
         var result = await accessibilityScanner.ScanAsync(run.Id, url, ct);
         result.Url = Normalize(url);
@@ -220,6 +254,7 @@ public sealed class WebsiteCrawler(
             run.PagesAccessibilityScanned++;
         }
         else run.AccessibilityScanFailures++;
+        return result;
     }
 
     private static IEnumerable<string> ExtractResourceUrls(AngleSharp.Dom.IDocument doc)

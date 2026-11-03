@@ -9,7 +9,8 @@ Kinetic-A11y is a .NET 10 Blazor Server app that discovers publicly linked PDF d
 - Find PDF links in HTML links, frames, embeds, objects, sources, and common URL data attributes, as well as sitemaps.
 - Check discovered PDF URLs with HTTP requests and report them as valid, unverified, or unavailable. The app does not intentionally download entire PDFs.
 - Persist crawl runs and results in SQLite; view progress and results in the web UI and export PDFs or accessibility results as CSV.
-- Optionally scan crawled pages with axe-core in headless Chromium for WCAG 2.0/2.1 Level A and AA rules.
+- Optionally scan crawled pages with axe-core in headless Chromium for WCAG 2.0/2.1/2.2 Level A and AA rules, with separate Best Practices results.
+- Score SEO and broken links on crawled HTML pages, and show per-page category scores and an overall site score.
 
 Automated accessibility checks cover only a subset of accessibility issues. The 0–100 score is a prioritization heuristic, not a compliance determination.
 
@@ -30,6 +31,10 @@ Open the local URL printed by ASP.NET Core. The app creates `pdf-discovery.db` i
 
 On the home page, enter an absolute HTTP or HTTPS root URL, choose a maximum crawl depth (default 5) and page limit (default 2,000), and optionally turn off accessibility scanning. The accepted UI limits are depth 0–20 and 1–100,000 pages. Runs execute in a background worker; the run page refreshes while the crawl is active.
 
+Use **Cancel scan** on the run page to stop a queued or running scan, retaining its saved results. Once stopped (or completed or failed), **Start again** permanently deletes the previous run, its PDFs, and accessibility results, and creates a fresh run with the same URL, crawl limits, and accessibility setting. It does not resume the previous crawl.
+
+Use **Delete scan**, then **Confirm delete**, to permanently remove a run and all its associated PDF records, page accessibility results, and violations without starting another run. Active work is stopped before deletion. **Keep scan** dismisses the confirmation without changing the run.
+
 ## Configuration
 
 Settings are in `src/Kinetic-A11y.Web/appsettings.json`:
@@ -42,13 +47,22 @@ Settings are in `src/Kinetic-A11y.Web/appsettings.json`:
 | `Crawler` | `AllowedHosts` | Additional hosts the HTML crawler may follow. |
 | `Crawler` | `CheckSitemaps` | Whether to inspect `robots.txt` and common sitemap URLs. |
 | `Accessibility` | `Enabled` | Global switch for accessibility scanning. |
-| `Accessibility` | `Tags` | axe-core rule tags to run. Defaults to WCAG 2.0/2.1 A and AA. |
+| `Accessibility` | `Tags` | axe-core rule tags to run. Defaults to WCAG 2.0/2.1/2.2 A and AA; Best Practices checks are also run separately. |
 | `Accessibility` | `PageTimeoutSeconds` | Browser navigation and page-operation timeout. |
-| `Accessibility` | `ScoreDecayConstant` | Score decay factor (default 50). |
 | `Accessibility` | `MaxViolationsStoredPerPage` | Maximum violation records saved per page (default 100). |
 | `Accessibility` | `AutoInstallBrowsers` / `Headless` | Automatically install Chromium when missing and run it without a visible window. |
 
-The page score is `round(100 × e^(-penalty / decay))`, where penalty sums impact weight × affected node count (critical 10, serious 5, moderate 3, minor 1). The run score is the average of successfully scored pages; scores of 90+ are marked good, 50–89 fair, and below 50 poor.
+## DubBot-style scoring
+
+Scoring follows [DubBot's published methodology](https://help.dubbot.com/en/articles/11464984-scoring): each page's category score is `max(0, 100 - 5 * distinct issue types)`. One accessibility rule failing on seven elements counts once, not seven times. Impact severity only controls display order. Twenty or more issue types produce a score of 0. Accessibility and Best Practices are classified separately using axe-core WCAG tags; incomplete checks are not counted as confirmed violations.
+
+Site category scores are unrounded arithmetic averages of successfully checked pages. The overall site score averages Accessibility, Broken Links, and SEO category scores, excluding Best Practices. Accessibility is omitted when scanning is disabled. A page's overall score averages the same enabled categories; it is unavailable if any enabled category failed. Site scores are unavailable until every enabled category has at least one successful result. Failed checks are excluded from category averages, not treated as perfect scores; coverage is shown and scores are provisional during a scan or with incomplete coverage. The site average uses all saved quality pages, not just the 1,000 displayed in the table.
+
+SEO currently checks for a nonempty title and meta description. Broken-link checks cover distinct HTTP(S) anchor/area destinations, including external links, resolve HTML base URLs, ignore fragments, and cache checks within a run. A failing HEAD request is confirmed with GET (without reading the body); confirmed 404/410 responses count as broken URLs. Timeouts, network errors, authorization failures, rate limits, and other non-success responses are inconclusive and make that page's broken-link score unavailable. Repeated links to the same URL count once. These requests add crawl time and outbound traffic.
+
+The formula matches DubBot's published scoring, not its proprietary detection engine or full product coverage. Spelling and Web Governance are not implemented or included in the overall score. Results and issue details can be exported from `/runs/{id}/quality/export`; the accessibility export identifies legacy versus new-format scores.
+
+Existing scores retain their legacy weighted formula and are labeled accordingly. A new additive quality-results table is created without deleting existing runs; start a fresh run to obtain the new scores. Deleting or replacing a run also deletes its quality results. The old `ScoreDecayConstant` setting no longer applies.
 
 The app uses EF Core `EnsureCreated`, not migrations. If the existing database is missing the current accessibility schema, startup recreates it; this deletes existing discovery data.
 
