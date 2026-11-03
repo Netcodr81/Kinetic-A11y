@@ -426,3 +426,11 @@ FodyWeavers.xsd
 
 # Official VS Code C# Dev Kit Extension exclusion
 #*.lscache
+
+# Rider files
+/.idea/
+/.idea/
+/src/Kinetic-A11y.Web/.idea/.idea.PdfDiscovery.dir/.idea/.gitignore
+/src/Kinetic-A11y.Web/.idea/.idea.PdfDiscovery.dir/.idea/.name
+/src/Kinetic-A11y.Web/.idea/.idea.PdfDiscovery.dir/.idea/encodings.xml
+/src/Kinetic-A11y.Web/.idea/.idea.PdfDiscovery.dir/.idea/indexLayout.xml

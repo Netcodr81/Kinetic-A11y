@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Kinetic-A11y.Web/Kinetic-A11y.Web.csproj" />
+  </Folder>
+</Solution>

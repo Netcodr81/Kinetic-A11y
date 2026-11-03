@@ -1,0 +1,91 @@
+@page "/"
+@using Kinetic
+
+@inject IDbContextFactory<DiscoveryDbContext> DbFactory
+@inject DiscoveryQueue Queue
+@inject NavigationManager Navigation
+
+<PageTitle>PDF Website Discovery</PageTitle>
+<h1>PDF Website Discovery</h1>
+<p class="muted">Enter a public website root URL to discover publicly linked PDF documents.</p>
+
+<div class="panel">
+    <label for="rootUrl">Root website URL</label>
+    <input id="rootUrl" @bind="rootUrl" placeholder="https://www.example.gov" />
+    <div class="settings">
+        <div><label for="depth">Max crawl depth</label><input id="depth" type="number" @bind="maxDepth" min="0" max="20" /></div>
+        <div><label for="pages">Max pages</label><input id="pages" type="number" @bind="maxPages" min="1" max="100000" /></div>
+    </div>
+    <label class="checkbox"><input type="checkbox" @bind="scanAccessibility" /> Scan page accessibility (axe-core, WCAG 2.1 A/AA)</label>
+    <button @onclick="StartAsync" disabled="@starting">@(starting ? "Starting..." : "Start discovery")</button>
+    @if (!string.IsNullOrWhiteSpace(error)) { <p class="error">@error</p> }
+</div>
+
+<h2>Recent discovery runs</h2>
+@if (runs is null) { <p>Loading...</p> }
+else if (runs.Count == 0) { <p class="muted">No discovery runs yet.</p> }
+else
+{
+    <table>
+        <thead><tr><th>Website</th><th>Status</th><th>Pages</th><th>PDFs</th><th>A11y score</th><th>Created</th><th></th></tr></thead>
+        <tbody>
+        @foreach (var run in runs)
+        {
+            <tr>
+                <td>@run.RootUrl</td><td>@run.Status</td>
+                <td>@run.PagesCrawled / @run.PagesDiscovered</td>
+                <td>@run.PdfsDiscovered (@run.PdfsValidated valid)</td>
+                <td>
+                    @if (!run.ScanAccessibility) { <span class="muted">Off</span> }
+                    else
+                    {
+                        var score = run.AverageAccessibilityScore is { } avg ? (int?)Math.Round(avg) : null;
+                        <span class="score score-@AccessibilityScoring.Band(score)">@(score?.ToString() ?? "—")</span>
+                    }
+                </td>
+                <td>@run.CreatedAt.ToLocalTime().ToString("g")</td>
+                <td><a href="/runs/@run.Id">View</a></td>
+            </tr>
+        }
+        </tbody>
+    </table>
+}
+@code {
+    private string rootUrl = "";
+    private int maxDepth = 5;
+    private int maxPages = 2000;
+    private bool scanAccessibility = true;
+    private bool starting;
+    private string? error;
+    private List<DiscoveryRun>? runs;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var storedRuns = await db.DiscoveryRuns.AsNoTracking().ToListAsync();
+        // SQLite cannot order DateTimeOffset values; sort before applying the display limit.
+        runs = storedRuns.OrderByDescending(x => x.CreatedAt).Take(50).ToList();
+    }
+
+    private async Task StartAsync()
+    {
+        starting = true; error = null;
+        try
+        {
+            if (!Uri.TryCreate(rootUrl, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
+                throw new InvalidOperationException("Enter a valid absolute HTTP or HTTPS URL.");
+            if (maxPages is < 1 or > 100000 || maxDepth is < 0 or > 20)
+                throw new InvalidOperationException("Crawl limits are outside the permitted range.");
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var run = new DiscoveryRun { RootUrl = uri.AbsoluteUri, MaxDepth = maxDepth, MaxPages = maxPages, ScanAccessibility = scanAccessibility };
+            db.DiscoveryRuns.Add(run);
+            await db.SaveChangesAsync();
+            await Queue.EnqueueAsync(run.Id);
+            Navigation.NavigateTo($"/runs/{run.Id}");
+        }
+        catch (Exception ex) { error = ex.Message; }
+        finally { starting = false; }
+    }
+}

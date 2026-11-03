@@ -1,0 +1,147 @@
+@page "/runs/{RunId:guid}"
+@rendermode InteractiveServer
+@using Kinetic
+@implements IAsyncDisposable
+@inject IDbContextFactory<DiscoveryDbContext> DbFactory
+
+<PageTitle>Discovery run</PageTitle>
+<a href="/">← All runs</a>
+@if (run is null) { <p>Loading run...</p> }
+else
+{
+    <h1>Discovery results</h1>
+    <p class="muted">@run.RootUrl</p>
+    <div class="stats">
+        <div class="stat"><strong>@run.PagesCrawled</strong><span>Pages crawled</span></div>
+        <div class="stat"><strong>@run.PdfsDiscovered</strong><span>PDFs discovered</span></div>
+        <div class="stat"><strong>@run.PdfsValidated</strong><span>Validated</span></div>
+        <div class="stat"><strong>@run.FailedRequests</strong><span>Failed requests</span></div>
+    </div>
+    <p>Status: <strong>@run.Status</strong> · Started: @run.StartedAt?.ToLocalTime().ToString("g")</p>
+    @if (!string.IsNullOrWhiteSpace(run.Error)) { <p class="error">@run.Error</p> }
+    <div class="toolbar">
+        <h2>Discovered PDFs</h2>
+        <a href="/runs/@RunId/export">Export CSV</a>
+    </div>
+    <table>
+        <thead><tr><th>File</th><th>Status</th><th>Size</th><th>Source page</th><th>PDF URL</th></tr></thead>
+        <tbody>
+        @foreach (var pdf in documents)
+        {
+            <tr>
+                <td>@pdf.FileName</td><td>@pdf.Status</td>
+                <td>@(pdf.FileSizeBytes.HasValue ? $"{pdf.FileSizeBytes.Value:N0} bytes" : "—")</td>
+                <td><a href="@pdf.SourcePageUrl" target="_blank" rel="noopener noreferrer">Source</a></td>
+                <td><a href="@pdf.Url" target="_blank" rel="noopener noreferrer">Open PDF</a></td>
+            </tr>
+        }
+        </tbody>
+    </table>
+
+    @if (run.ScanAccessibility)
+    {
+        var avg = run.AverageAccessibilityScore is { } a ? (int?)Math.Round(a) : null;
+        <div class="toolbar">
+            <h2>Page accessibility</h2>
+            <a href="/runs/@RunId/accessibility/export">Export accessibility CSV</a>
+        </div>
+        <div class="stats">
+            <div class="stat"><strong><span class="score score-@AccessibilityScoring.Band(avg)">@(avg?.ToString() ?? "—")</span></strong><span>Average automated score</span></div>
+            <div class="stat"><strong>@run.PagesAccessibilityScanned</strong><span>Pages scanned</span></div>
+            <div class="stat"><strong>@run.AccessibilityScanFailures</strong><span>Scan failures</span></div>
+            <div class="stat"><strong>@accessibilityResults.Sum(x => x.CriticalCount + x.SeriousCount)</strong><span>Critical + serious rule failures</span></div>
+        </div>
+        <p class="muted">Automated axe-core checks (WCAG 2.1 A/AA) detect only a subset of accessibility issues. The score is a heuristic, not a compliance determination.</p>
+        @if (accessibilityResults.Count == 0) { <p class="muted">No pages scanned yet.</p> }
+        else
+        {
+            <table>
+                <thead><tr><th>Score</th><th>Page</th><th>Critical</th><th>Serious</th><th>Moderate</th><th>Minor</th><th>Violations</th></tr></thead>
+                <tbody>
+                @foreach (var pageResult in accessibilityResults)
+                {
+                    <tr>
+                        <td><span class="score score-@AccessibilityScoring.Band(pageResult.Score)">@(pageResult.Score?.ToString() ?? "—")</span></td>
+                        <td><a href="@pageResult.Url" target="_blank" rel="noopener noreferrer">@pageResult.Url</a></td>
+                        <td>@pageResult.CriticalCount</td><td>@pageResult.SeriousCount</td><td>@pageResult.ModerateCount</td><td>@pageResult.MinorCount</td>
+                        <td>
+                            @if (!string.IsNullOrWhiteSpace(pageResult.Error)) { <span class="error">@pageResult.Error</span> }
+                            else if (pageResult.Violations.Count == 0) { <span class="muted">None</span> }
+                            else
+                            {
+                                <details>
+                                    <summary>@pageResult.Violations.Count rule(s)</summary>
+                                    <ul>
+                                    @foreach (var v in pageResult.Violations)
+                                    {
+                                        <li>
+                                            <span class="impact impact-@v.Impact">@v.Impact</span>
+                                            <a href="@v.HelpUrl" target="_blank" rel="noopener noreferrer">@v.RuleId</a>
+                                            — @v.Help (@v.NodeCount element@(v.NodeCount == 1 ? "" : "s"))
+                                            @if (!string.IsNullOrWhiteSpace(v.SampleTarget)) { <div><code>@v.SampleTarget</code></div> }
+                                        </li>
+                                    }
+                                    </ul>
+                                </details>
+                            }
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        }
+    }
+}
+@code {
+    [Parameter] public Guid RunId { get; set; }
+    private DiscoveryRun? run;
+    private List<DiscoveredPdf> documents = [];
+    private List<PageAccessibilityResult> accessibilityResults = [];
+    private PeriodicTimer? timer;
+    private CancellationTokenSource? cts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        cts = new CancellationTokenSource();
+        timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        await RefreshAsync();
+        _ = PollAsync(cts.Token);
+    }
+    private async Task PollAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (timer is not null && await timer.WaitForNextTickAsync(ct))
+            {
+                await RefreshAsync();
+                await InvokeAsync(StateHasChanged);
+                if (run?.Status is DiscoveryRunStatus.Completed or DiscoveryRunStatus.Failed or DiscoveryRunStatus.Cancelled) break;
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+    private async Task RefreshAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        run = await db.DiscoveryRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == RunId);
+        var storedDocuments = await db.DiscoveredPdfs.AsNoTracking()
+            .Where(x => x.DiscoveryRunId == RunId).ToListAsync();
+        // Keep filtering in SQLite, but sort DateTimeOffset values in memory before limiting.
+        documents = storedDocuments.OrderByDescending(x => x.FirstDiscoveredAt).Take(1000).ToList();
+        if (run?.ScanAccessibility == true)
+        {
+            var storedResults = await db.PageAccessibilityResults.AsNoTracking().Include(x => x.Violations)
+                .Where(x => x.DiscoveryRunId == RunId).ToListAsync();
+            accessibilityResults = storedResults
+                .OrderBy(x => x.Score ?? int.MaxValue).ThenBy(x => x.Url).Take(1000).ToList();
+            foreach (var result in accessibilityResults)
+                result.Violations = result.Violations
+                    .OrderByDescending(v => AccessibilityScoring.ImpactWeight(v.Impact)).ThenByDescending(v => v.NodeCount).ToList();
+        }
+    }
+    public ValueTask DisposeAsync()
+    {
+        cts?.Cancel(); cts?.Dispose(); timer?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}
