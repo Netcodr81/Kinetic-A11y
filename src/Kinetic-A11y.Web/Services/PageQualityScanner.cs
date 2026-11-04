@@ -142,7 +142,8 @@ public sealed class PageQualityScanner(ILogger<PageQualityScanner> logger)
             return (null, message);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or Polly.Timeout.TimeoutRejectedException)
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or
+                                   Polly.Timeout.TimeoutRejectedException or Polly.CircuitBreaker.BrokenCircuitException)
         {
             logger.LogWarning(ex, "Link check failed for {Url}", url);
             return (null, ex.Message);
