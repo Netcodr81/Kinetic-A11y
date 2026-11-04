@@ -185,7 +185,7 @@ public sealed class AccessibilityScanner(
         // WCAG violations; the highest-impact rules with the most affected nodes are stored first.
         result.QualityIssues.AddRange(allViolations.Select(v => new QualityIssue(
             v.Tags.Any(t => t.StartsWith("wcag", StringComparison.Ordinal)) ? "Accessibility" : "Best Practices",
-            v.Id, v.Help, v.Nodes?.FirstOrDefault()?.Target?.ToString())));
+            v.Id, v.Help, v.Nodes?.FirstOrDefault()?.Target?.ToString(), GetWcagLevel(v.Tags))));
 
         var previewCount = 0;
         foreach (var v in violations
@@ -201,6 +201,7 @@ public sealed class AccessibilityScanner(
                 Description = v.Description,
                 Help = v.Help,
                 HelpUrl = Truncate(v.HelpUrl, 2048),
+                WcagLevel = GetWcagLevel(v.Tags),
                 NodeCount = v.Nodes?.Length ?? 0,
                 SampleTarget = Truncate(FormatTarget(node?.Target), MaxSnippetLength),
                 SampleHtml = Truncate(node?.Html, MaxSnippetLength)
@@ -331,6 +332,21 @@ public sealed class AccessibilityScanner(
 
     private static bool Is(string? impact, string expected) =>
         string.Equals(impact, expected, StringComparison.OrdinalIgnoreCase);
+
+    private static string? GetWcagLevel(IEnumerable<string> tags)
+    {
+        var level = tags
+            .Where(tag => tag.StartsWith("wcag", StringComparison.Ordinal))
+            .Select(tag => tag.EndsWith("aaa", StringComparison.Ordinal) ? "AAA"
+                : tag.EndsWith("aa", StringComparison.Ordinal) ? "AA"
+                : tag.EndsWith("a", StringComparison.Ordinal) ? "A"
+                : null)
+            .Where(level => level is not null)
+            .OrderByDescending(level => level switch { "AAA" => 3, "AA" => 2, _ => 1 })
+            .FirstOrDefault();
+
+        return level;
+    }
 
     private static string? Truncate(string? value, int max) =>
         value is null || value.Length <= max ? value : value[..max];

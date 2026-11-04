@@ -57,7 +57,7 @@ public sealed class PageQualityResult
 /// <param name="RuleId">A stable identifier for the rule or issue type.</param>
 /// <param name="Message">A human-readable explanation of the finding.</param>
 /// <param name="Target">An optional DOM target associated with the finding.</param>
-public sealed record QualityIssue(string Category, string RuleId, string Message, string? Target = null);
+public sealed record QualityIssue(string Category, string RuleId, string Message, string? Target = null, string? WcagLevel = null);
 
 /// <summary>Calculates aggregate page counts and category averages for a site scan.</summary>
 public sealed class SiteQualitySummary(IEnumerable<PageQualityResult> results)

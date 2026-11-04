@@ -50,6 +50,7 @@ using (var scope = app.Services.CreateScope())
     await db.EnsureQualitySchemaAsync();
     await db.EnsureJavaScriptSchemaAsync();
     await db.EnsureIssuePreviewSchemaAsync();
+    await db.EnsureWcagLevelSchemaAsync();
 }
 if (!app.Environment.IsDevelopment())
 {
@@ -78,16 +79,16 @@ app.MapGet("/runs/{runId:guid}/accessibility/export", async (Guid runId, IDbCont
     static string Csv(string? value) => "\"" + (value ?? "").Replace("\"", "\"\"") + "\"";
     var quality = await db.PageQualityResults.AsNoTracking().Where(x => x.DiscoveryRunId == runId)
         .ToDictionaryAsync(x => x.Url, ct);
-    var lines = new List<string> { "PageUrl,Score,ScoringMethod,Critical,Serious,Moderate,Minor,PageError,RuleId,Impact,NodeCount,Help,HelpUrl,SampleTarget" };
+    var lines = new List<string> { "PageUrl,Score,ScoringMethod,Critical,Serious,Moderate,Minor,PageError,RuleId,WcagLevel,Impact,NodeCount,Help,HelpUrl,SampleTarget" };
     foreach (var page in pages.OrderBy(x => x.Score ?? -1).ThenBy(x => x.Url))
     {
         var prefix = string.Join(",", Csv(page.Url), page.Score?.ToString() ?? "",
             Csv(quality.ContainsKey(page.Url) ? "DubBot-style" : "Legacy weighted"), page.CriticalCount, page.SeriousCount,
             page.ModerateCount, page.MinorCount, Csv(page.Error));
-        if (page.Violations.Count == 0) { lines.Add(prefix + ",,,,,,"); continue; }
+        if (page.Violations.Count == 0) { lines.Add(prefix + ",,,,,,,"); continue; }
         lines.AddRange(page.Violations
             .OrderByDescending(v => AccessibilityScoring.ImpactWeight(v.Impact)).ThenByDescending(v => v.NodeCount)
-            .Select(v => string.Join(",", prefix, Csv(v.RuleId), Csv(v.Impact), v.NodeCount, Csv(v.Help), Csv(v.HelpUrl), Csv(v.SampleTarget))));
+            .Select(v => string.Join(",", prefix, Csv(v.RuleId), Csv(v.WcagLevel), Csv(v.Impact), v.NodeCount, Csv(v.Help), Csv(v.HelpUrl), Csv(v.SampleTarget))));
     }
     return Results.File(System.Text.Encoding.UTF8.GetBytes(string.Join("\r\n", lines)), "text/csv", $"accessibility-{runId}.csv");
 });

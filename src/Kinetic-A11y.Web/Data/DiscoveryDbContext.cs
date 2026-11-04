@@ -63,6 +63,7 @@ public sealed class DiscoveryDbContext(DbContextOptions<DiscoveryDbContext> opti
             b.Property(x => x.RuleId).HasMaxLength(256);
             b.Property(x => x.Impact).HasMaxLength(32);
             b.Property(x => x.HelpUrl).HasMaxLength(2048);
+            b.Property(x => x.WcagLevel).HasMaxLength(8);
             b.Property(x => x.SampleTarget).HasMaxLength(1024);
             b.Property(x => x.SampleHtml).HasMaxLength(1024);
             b.Property(x => x.PreviewPath).HasMaxLength(512);
@@ -105,6 +106,23 @@ public sealed class DiscoveryDbContext(DbContextOptions<DiscoveryDbContext> opti
                 while (await reader.ReadAsync()) columns.Add(reader.GetString(1));
             if (!columns.Contains(nameof(AccessibilityViolation.PreviewPath)))
                 await Database.ExecuteSqlRawAsync("ALTER TABLE AccessibilityViolations ADD COLUMN PreviewPath TEXT NULL");
+        }
+        finally { await Database.CloseConnectionAsync(); }
+    }
+
+    /// <summary>Adds the WCAG level column to an existing accessibility violations table when absent.</summary>
+    public async Task EnsureWcagLevelSchemaAsync()
+    {
+        await Database.OpenConnectionAsync();
+        try
+        {
+            using var command = Database.GetDbConnection().CreateCommand();
+            command.CommandText = "PRAGMA table_info('AccessibilityViolations')";
+            var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            await using (var reader = await command.ExecuteReaderAsync())
+                while (await reader.ReadAsync()) columns.Add(reader.GetString(1));
+            if (!columns.Contains(nameof(AccessibilityViolation.WcagLevel)))
+                await Database.ExecuteSqlRawAsync("ALTER TABLE AccessibilityViolations ADD COLUMN WcagLevel TEXT NULL");
         }
         finally { await Database.CloseConnectionAsync(); }
     }

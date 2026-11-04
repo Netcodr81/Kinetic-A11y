@@ -163,6 +163,9 @@ public sealed class AccessibilityViolation
     /// <summary>Gets or sets the URL of the rule guidance.</summary>
     public string? HelpUrl { get; set; }
 
+    /// <summary>Gets or sets the highest WCAG conformance level tagged for this rule.</summary>
+    public string? WcagLevel { get; set; }
+
     /// <summary>Gets or sets the number of affected DOM nodes for this rule.</summary>
     public int NodeCount { get; set; }
 
