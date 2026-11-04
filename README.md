@@ -58,7 +58,12 @@ Settings are in `src/Kinetic-A11y.Web/appsettings.json`:
 | `Accessibility` | `Tags` | axe-core rule tags to run. Defaults to WCAG 2.0/2.1/2.2 A and AA; Best Practices checks are also run separately. |
 | `Accessibility` | `PageTimeoutSeconds` | Browser navigation and page-operation timeout. |
 | `Accessibility` | `MaxViolationsStoredPerPage` | Maximum violation records saved per page (default 100). |
+| `Accessibility` | `CaptureIssuePreviews` | Whether to save screenshots with the affected element outlined. |
+| `Accessibility` | `IssuePreviewDirectory` | Directory for preview PNG files, relative to the app content root unless absolute. |
+| `Accessibility` | `MaxIssuePreviewsPerPage` | Maximum preview images captured for a page (default 10). |
 | `Accessibility` | `AutoInstallBrowsers` / `Headless` | Automatically install Chromium when missing and run it without a visible window. |
+
+Issue previews are captured for the highest-impact stored WCAG violations when their target can be located in the scanned page. PNG files are stored outside the web root; only their generated relative paths are stored in SQLite. Previews are removed when a run is deleted or replaced. Screenshots can contain sensitive page content, so keep the app and preview directory within a trusted environment.
 
 ## DubBot-style scoring
 

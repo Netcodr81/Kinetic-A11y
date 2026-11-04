@@ -9,6 +9,7 @@ namespace Kinetic;
 /// <summary>Loads pages in Chromium and maps axe-core findings to discovery result models.</summary>
 public sealed class AccessibilityScanner(
     IOptions<AccessibilityOptions> options,
+    IssuePreviewStore previews,
     ILogger<AccessibilityScanner> logger) : IAsyncDisposable
 {
     private const int MaxSnippetLength = 1000;
@@ -63,7 +64,7 @@ public sealed class AccessibilityScanner(
             if (scanAccessibility && IsEnabled)
             {
                 result = new PageAccessibilityResult { DiscoveryRunId = runId, Url = url.AbsoluteUri };
-                try { Map(await RunChecksAsync(page), result); }
+                try { await MapAsync(await RunChecksAsync(page), result, page, ct); }
                 catch (Exception ex)
                 {
                     ct.ThrowIfCancellationRequested();
@@ -116,7 +117,7 @@ public sealed class AccessibilityScanner(
 
             var axe = await RunChecksAsync(page);
             ct.ThrowIfCancellationRequested();
-            Map(axe, result);
+            await MapAsync(axe, result, page, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex)
@@ -153,7 +154,7 @@ public sealed class AccessibilityScanner(
         RestoreScroll = true
     });
 
-    private void Map(AxeResult axe, PageAccessibilityResult result)
+    private async Task MapAsync(AxeResult axe, PageAccessibilityResult result, IPage page, CancellationToken ct)
     {
         var allViolations = axe.Violations ?? [];
         // The configured WCAG tags identify accessibility findings; other selected rules are
@@ -179,13 +180,14 @@ public sealed class AccessibilityScanner(
             v.Tags.Any(t => t.StartsWith("wcag", StringComparison.Ordinal)) ? "Accessibility" : "Best Practices",
             v.Id, v.Help, v.Nodes?.FirstOrDefault()?.Target?.ToString())));
 
+        var previewCount = 0;
         foreach (var v in violations
                      .OrderByDescending(v => AccessibilityScoring.ImpactWeight(v.Impact))
                      .ThenByDescending(v => v.Nodes?.Length ?? 0)
                      .Take(Math.Max(0, _options.MaxViolationsStoredPerPage)))
         {
             var node = v.Nodes?.FirstOrDefault();
-            result.Violations.Add(new AccessibilityViolation
+            var violation = new AccessibilityViolation
             {
                 RuleId = Truncate(v.Id, 256) ?? "unknown",
                 Impact = v.Impact,
@@ -193,9 +195,94 @@ public sealed class AccessibilityScanner(
                 Help = v.Help,
                 HelpUrl = Truncate(v.HelpUrl, 2048),
                 NodeCount = v.Nodes?.Length ?? 0,
-                SampleTarget = Truncate(node?.Target?.ToString(), MaxSnippetLength),
+                SampleTarget = Truncate(FormatTarget(node?.Target), MaxSnippetLength),
                 SampleHtml = Truncate(node?.Html, MaxSnippetLength)
+            };
+            result.Violations.Add(violation);
+
+            if (_options.CaptureIssuePreviews && previewCount < Math.Max(0, _options.MaxIssuePreviewsPerPage))
+            {
+                var selector = GetTargetSelector(node?.Target);
+                if (!string.IsNullOrWhiteSpace(selector))
+                {
+                    try
+                    {
+                        var image = await CaptureHighlightedPreviewAsync(page, selector, ct);
+                        if (image is not null)
+                        {
+                            await previews.SaveAsync(result.DiscoveryRunId, violation.Id, image, ct);
+                            violation.PreviewPath = previews.GetRelativePath(result.DiscoveryRunId, violation.Id);
+                            previewCount++;
+                        }
+                    }
+                    catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                    catch (Exception ex)
+                    {
+                        logger.LogWarning(ex, "Could not capture preview for accessibility rule {RuleId} on {Url}",
+                            violation.RuleId, result.Url);
+                    }
+                }
+            }
+        }
+    }
+
+    private static string? FormatTarget(object? target) => target switch
+    {
+        string selector => selector,
+        IEnumerable<string> selectors => string.Join(" > ", selectors),
+        _ => target?.ToString()
+    };
+
+    private static string? GetTargetSelector(object? target) => target switch
+    {
+        string selector => selector,
+        IEnumerable<string> selectors => GetSingleSelector(selectors),
+        _ => target?.ToString()
+    };
+
+    private static string? GetSingleSelector(IEnumerable<string> selectors)
+    {
+        using var enumerator = selectors.GetEnumerator();
+        if (!enumerator.MoveNext()) return null;
+        var selector = enumerator.Current;
+        return enumerator.MoveNext() ? null : selector;
+    }
+
+    private async Task<byte[]?> CaptureHighlightedPreviewAsync(IPage page, string selector, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        var element = page.Locator(selector).First;
+        if (await element.CountAsync() == 0) return null;
+
+        await element.ScrollIntoViewIfNeededAsync(new LocatorScrollIntoViewIfNeededOptions
+        {
+            Timeout = _options.PageTimeoutSeconds * 1000f
+        });
+        var originalStyle = await element.GetAttributeAsync("style");
+        try
+        {
+            await element.EvaluateAsync("""
+                element => {
+                    element.style.outline = "4px solid #d00000";
+                    element.style.outlineOffset = "3px";
+                    element.scrollIntoView({ block: "center", inline: "center" });
+                }
+                """);
+            return await page.ScreenshotAsync(new PageScreenshotOptions
+            {
+                Type = ScreenshotType.Png,
+                FullPage = false,
+                Animations = ScreenshotAnimations.Disabled
             });
+        }
+        finally
+        {
+            await element.EvaluateAsync("""
+                (element, style) => {
+                    if (style === null) element.removeAttribute("style");
+                    else element.setAttribute("style", style);
+                }
+                """, originalStyle);
         }
     }
 

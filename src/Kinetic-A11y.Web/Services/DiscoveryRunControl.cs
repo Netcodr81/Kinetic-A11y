@@ -6,6 +6,7 @@ namespace Kinetic;
 public sealed class DiscoveryRunControl(
     IDbContextFactory<DiscoveryDbContext> dbFactory,
     DiscoveryQueue queue,
+    IssuePreviewStore previews,
     ILogger<DiscoveryRunControl> logger)
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -53,6 +54,7 @@ public sealed class DiscoveryRunControl(
                 ?? throw new InvalidOperationException("This discovery run no longer exists.");
             db.DiscoveryRuns.Remove(run);
             await db.SaveChangesAsync();
+            previews.DeleteRun(runId);
         }
         finally { _gate.Release(); }
     }
@@ -84,6 +86,7 @@ public sealed class DiscoveryRunControl(
             db.DiscoveryRuns.Add(replacement);
             // SaveChanges deletes the old results and inserts the replacement in one transaction.
             await db.SaveChangesAsync();
+            previews.DeleteRun(runId);
             await queue.EnqueueAsync(replacement.Id);
             return replacement.Id;
         }

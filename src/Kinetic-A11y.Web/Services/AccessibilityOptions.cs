@@ -15,6 +15,15 @@ public sealed class AccessibilityOptions
     /// <summary>Gets or sets the maximum number of violation records retained for each page.</summary>
     public int MaxViolationsStoredPerPage { get; set; } = 100;
 
+    /// <summary>Gets or sets whether to save highlighted screenshots for accessibility violations.</summary>
+    public bool CaptureIssuePreviews { get; set; } = true;
+
+    /// <summary>Gets or sets the directory used to store issue-preview images.</summary>
+    public string IssuePreviewDirectory { get; set; } = "App_Data/issue-previews";
+
+    /// <summary>Gets or sets the maximum number of issue-preview images captured for each page.</summary>
+    public int MaxIssuePreviewsPerPage { get; set; } = 10;
+
     /// <summary>Gets or sets whether Chromium is downloaded automatically if Playwright cannot find it.</summary>
     public bool AutoInstallBrowsers { get; set; } = true;
 

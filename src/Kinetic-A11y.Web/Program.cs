@@ -22,6 +22,7 @@ builder.Services.AddHttpClient("crawler", client =>
 builder.Services.Configure<CrawlerOptions>(builder.Configuration.GetSection("Crawler"));
 builder.Services.Configure<AccessibilityOptions>(builder.Configuration.GetSection("Accessibility"));
 builder.Services.AddSingleton<AccessibilityScanner>();
+builder.Services.AddSingleton<IssuePreviewStore>();
 builder.Services.AddSingleton<DiscoveryQueue>();
 builder.Services.AddSingleton<DiscoveryRunControl>();
 builder.Services.AddScoped<WebsiteCrawler>();
@@ -48,6 +49,7 @@ using (var scope = app.Services.CreateScope())
     }
     await db.EnsureQualitySchemaAsync();
     await db.EnsureJavaScriptSchemaAsync();
+    await db.EnsureIssuePreviewSchemaAsync();
 }
 if (!app.Environment.IsDevelopment())
 {
@@ -101,6 +103,20 @@ app.MapGet("/runs/{runId:guid}/quality/export", async (Guid runId, IDbContextFac
         Csv(x.LinkCheckError), Csv(x.IssuesJson))));
     return Results.File(System.Text.Encoding.UTF8.GetBytes(string.Join("\r\n", lines)), "text/csv", $"quality-{runId}.csv");
 });
+app.MapGet("/runs/{runId:guid}/accessibility/violations/{violationId:guid}/preview",
+    async (Guid runId, Guid violationId, IDbContextFactory<DiscoveryDbContext> factory,
+        IssuePreviewStore previews, CancellationToken ct) =>
+    {
+        await using var db = await factory.CreateDbContextAsync(ct);
+        var violation = await db.AccessibilityViolations.AsNoTracking()
+            .Include(x => x.PageAccessibilityResult)
+            .SingleOrDefaultAsync(x => x.Id == violationId &&
+                                      x.PageAccessibilityResult!.DiscoveryRunId == runId, ct);
+        if (violation?.PreviewPath is null) return Results.NotFound();
+
+        var path = previews.GetFullPath(runId, violationId);
+        return File.Exists(path) ? Results.File(path, "image/png") : Results.NotFound();
+    });
 app.MapStaticAssets().AllowAnonymous();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

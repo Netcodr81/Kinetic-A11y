@@ -160,6 +160,10 @@ else
                                             <span class="impact impact-@v.Impact">@v.Impact</span>
                                             <a href="@v.HelpUrl" target="_blank" rel="noopener noreferrer">@v.RuleId</a>
                                             — @v.Help (@v.NodeCount element@(v.NodeCount == 1 ? "" : "s"))
+                                            @if (!string.IsNullOrWhiteSpace(v.PreviewPath))
+                                            {
+                                                <div><a href="/runs/@RunId/accessibility/violations/@v.Id/preview" target="_blank" rel="noopener noreferrer">View highlighted preview</a></div>
+                                            }
                                             @if (!string.IsNullOrWhiteSpace(v.SampleTarget)) { <div><code>@v.SampleTarget</code></div> }
                                         </li>
                                     }

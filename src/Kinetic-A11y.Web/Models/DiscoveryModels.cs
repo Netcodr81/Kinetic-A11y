@@ -171,6 +171,9 @@ public sealed class AccessibilityViolation
 
     /// <summary>Gets or sets a truncated HTML snippet for one representative affected node.</summary>
     public string? SampleHtml { get; set; }
+
+    /// <summary>Gets or sets the relative location of the highlighted screenshot, if one was captured.</summary>
+    public string? PreviewPath { get; set; }
 }
 
 /// <summary>Stores the discovery source and URL-validation details for a found PDF.</summary>
