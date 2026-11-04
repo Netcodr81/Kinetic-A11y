@@ -103,8 +103,6 @@ public sealed class WebsiteCrawler(
                             throw new InvalidOperationException($"Expected an HTML page at {url}, but received {media}.");
                         html = await response.Content.ReadAsStringAsync(ct);
                     }
-                    run.PagesCrawled++;
-
                     var parser = new HtmlParser();
                     var document = await parser.ParseDocumentAsync(html, ct);
                     if (scannedPages.Add(Normalize(url)))
@@ -132,6 +130,7 @@ public sealed class WebsiteCrawler(
                                 .Distinct(StringComparer.Ordinal).ToArray()), ct);
                         db.Entry(quality).State = EntityState.Detached;
                     }
+                    run.PagesCrawled++;
                     var baseUrl = documentUrl;
                     if (run.RenderJavaScript &&
                         Uri.TryCreate(documentUrl, document.QuerySelector("base[href]")?.GetAttribute("href"), out var htmlBase) &&
@@ -160,6 +159,17 @@ public sealed class WebsiteCrawler(
                     await db.SaveChangesAsync(ct);
                 }
                 catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+                catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized)
+                {
+                    logger.LogInformation("Excluded authentication-required page from scanning and scoring: {Url}", url);
+                    // A browser-only 401 can arrive after the server-HTML quality result was saved.
+                    var normalized = Normalize(url);
+                    var quality = await db.PageQualityResults.SingleOrDefaultAsync(
+                        x => x.DiscoveryRunId == run.Id && x.Url == normalized, ct);
+                    if (quality is not null) db.PageQualityResults.Remove(quality);
+                    if (depth == 0) run.Error = "Root page requires authentication (HTTP 401) and was excluded.";
+                    await db.SaveChangesAsync(ct);
+                }
                 catch (Exception ex)
                 {
                     run.FailedRequests++;

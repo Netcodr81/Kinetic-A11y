@@ -2,6 +2,7 @@ using Deque.AxeCore.Commons;
 using Deque.AxeCore.Playwright;
 using Microsoft.Extensions.Options;
 using Microsoft.Playwright;
+using System.Net;
 
 
 namespace Kinetic;
@@ -52,6 +53,8 @@ public sealed class AccessibilityScanner(
                 Timeout = _options.PageTimeoutSeconds * 1000f
             });
             ct.ThrowIfCancellationRequested();
+            if (response?.Status == 401)
+                throw new HttpRequestException($"Authentication required while rendering {url}.", null, HttpStatusCode.Unauthorized);
             if (response is not null && !response.Ok)
                 throw new InvalidOperationException($"HTTP {response.Status} while rendering {url}.");
             var contentType = response is null ? null : await response.HeaderValueAsync("content-type");
@@ -87,6 +90,7 @@ public sealed class AccessibilityScanner(
     /// <param name="url">The page URL to scan.</param>
     /// <param name="ct">A token that cancels navigation and scanning.</param>
     /// <returns>The page result, including an error instead of a score if the scan fails.</returns>
+    /// <exception cref="HttpRequestException">The page returns HTTP 401 and must be excluded from scanning.</exception>
     public async Task<PageAccessibilityResult> ScanAsync(Guid runId, Uri url, CancellationToken ct)
     {
         var result = new PageAccessibilityResult { DiscoveryRunId = runId, Url = url.AbsoluteUri };
@@ -109,6 +113,8 @@ public sealed class AccessibilityScanner(
                 Timeout = _options.PageTimeoutSeconds * 1000f
             });
             ct.ThrowIfCancellationRequested();
+            if (response?.Status == 401)
+                throw new HttpRequestException($"Authentication required while scanning {url}.", null, HttpStatusCode.Unauthorized);
             if (response is not null && !response.Ok)
             {
                 result.Error = $"HTTP {response.Status} when loading page in browser";
@@ -120,6 +126,7 @@ public sealed class AccessibilityScanner(
             await MapAsync(axe, result, page, ct);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.Unauthorized) { throw; }
         catch (Exception ex)
         {
             ct.ThrowIfCancellationRequested();

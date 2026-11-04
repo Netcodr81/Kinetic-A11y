@@ -7,7 +7,8 @@ namespace Kinetic;
 /// <summary>Checks page metadata and outbound links to produce page-quality scores.</summary>
 public sealed class PageQualityScanner(ILogger<PageQualityScanner> logger)
 {
-    private readonly Dictionary<string, (bool? Broken, string? Error)> _linkChecks = new(StringComparer.Ordinal);
+    private enum LinkStatus { Available, Broken, Inconclusive, RequiresAuthentication }
+    private readonly Dictionary<string, (LinkStatus Status, string? Error)> _linkChecks = new(StringComparer.Ordinal);
 
     /// <summary>Creates a page result, extracts SEO issues, and checks its links.</summary>
     /// <param name="runId">The discovery run that owns the result.</param>
@@ -109,9 +110,11 @@ public sealed class PageQualityScanner(ILogger<PageQualityScanner> logger)
                 check = await CheckLinkAsync(new Uri(key), client, ct);
                 _linkChecks.Add(key, check);
             }
-            if (check.Broken == true)
+            if (check.Status == LinkStatus.RequiresAuthentication)
+                issues.Add(new("Excluded", key, "Requires authentication (HTTP 401); excluded from link scoring.", key));
+            else if (check.Status == LinkStatus.Broken)
                 issues.Add(new("Broken Links", key, check.Error ?? "Broken link.", key));
-            else if (check.Broken is null)
+            else if (check.Status == LinkStatus.Inconclusive)
                 errors.Add($"{key}: {check.Error}");
         }
         result.LinkCheckError = errors.Count == 0 ? null : string.Join("\n", errors);
@@ -123,30 +126,35 @@ public sealed class PageQualityScanner(ILogger<PageQualityScanner> logger)
         result.IssuesJson = JsonSerializer.Serialize(issues.DistinctBy(x => (x.Category, x.RuleId)));
     }
 
-    private async Task<(bool? Broken, string? Error)> CheckLinkAsync(Uri url, HttpClient client, CancellationToken ct)
+    private async Task<(LinkStatus Status, string? Error)> CheckLinkAsync(Uri url, HttpClient client, CancellationToken ct)
     {
         try
         {
             using var head = new HttpRequestMessage(HttpMethod.Head, url);
             using var response = await client.SendAsync(head, HttpCompletionOption.ResponseHeadersRead, ct);
-            if (response.IsSuccessStatusCode) return (false, null);
+            if (response.IsSuccessStatusCode) return (LinkStatus.Available, null);
             // HEAD is not consistently supported; confirm failures using GET without reading the body.
             using var get = new HttpRequestMessage(HttpMethod.Get, url);
             using var fallback = await client.SendAsync(get, HttpCompletionOption.ResponseHeadersRead, ct);
-            if (fallback.IsSuccessStatusCode) return (false, null);
+            if (fallback.IsSuccessStatusCode) return (LinkStatus.Available, null);
             var message = $"HTTP {(int)fallback.StatusCode}";
+            if (fallback.StatusCode == HttpStatusCode.Unauthorized)
+            {
+                logger.LogInformation("Excluded authentication-required link from scoring: {Url}", url);
+                return (LinkStatus.RequiresAuthentication, message);
+            }
             // Treat only clear missing-resource responses as broken; other failures may be temporary,
             // access-controlled, or unsupported and therefore cannot be scored confidently.
-            if (fallback.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone) return (true, message);
+            if (fallback.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone) return (LinkStatus.Broken, message);
             logger.LogWarning("Link check inconclusive for {Url}: {Status}", url, fallback.StatusCode);
-            return (null, message);
+            return (LinkStatus.Inconclusive, message);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or
                                    Polly.Timeout.TimeoutRejectedException or Polly.CircuitBreaker.BrokenCircuitException)
         {
             logger.LogWarning(ex, "Link check failed for {Url}", url);
-            return (null, ex.Message);
+            return (LinkStatus.Inconclusive, ex.Message);
         }
     }
 }
