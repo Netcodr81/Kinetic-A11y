@@ -20,6 +20,8 @@ Automated accessibility checks cover only a subset of accessibility issues. The 
 - Internet access from the machine running the app and crawler
 - Playwright Chromium for accessibility scans (installed automatically on first use by default)
 
+The app references `Microsoft.Playwright` directly so it does not use axe-core's older minimum dependency. Playwright package updates require the matching Chromium build; the default automatic installation handles this on the next scan. If the browser or driver disconnects, the scanner creates a fresh browser and driver for the next page. The affected page retains its error rather than being reported as successfully checked.
+
 From the repository root:
 
 ```bash
@@ -28,6 +30,8 @@ dotnet run --project src/Kinetic-A11y.Web/Kinetic-A11y.Web.csproj
 ```
 
 Open the local URL printed by ASP.NET Core. The app creates `pdf-discovery.db` in its working directory unless the `ConnectionStrings:Discovery` setting points elsewhere.
+
+The root URL counts as a discovered page even if loading it fails. Root-page errors, including HTTP status codes, are shown on the run; a run with no successfully loaded HTML pages is marked Failed rather than Completed. Some sites (including Cloudflare-protected sites) reject direct crawler requests with HTTP 403. Try the optional JavaScript-rendered mode for sites that load in a browser, but browser rendering does not guarantee access through bot protection. If access remains blocked, ask the site administrator to allow the scanner.
 
 On the home page, enter an absolute HTTP or HTTPS root URL, choose a maximum crawl depth (default 5) and page limit (default 2,000), and optionally turn off accessibility scanning. The accepted UI limits are depth 0–20 and 1–100,000 pages. Runs execute in a background worker; the run page refreshes while the crawl is active.
 
@@ -96,6 +100,8 @@ src/
 ```
 
 ## Scope and safety
+
+Only navigation links, frames, and URL data attributes supply HTML page candidates. Resource tags such as stylesheet links, embeds, objects, and sources still supply PDF candidates, but are not treated as page navigation. Common asset and document extensions are excluded from page crawling, including sitemap entries; extensionless URLs and dynamic page extensions remain eligible.
 
 The crawler discovers links from server HTML (or rendered HTML in optional JavaScript mode) and sitemaps. It does not search authenticated content, submit forms, explore POST-only endpoints, or guarantee discovery of unlinked files. Sitemap discovery is best-effort, and some servers may not support the requests used to verify PDF URLs.
 

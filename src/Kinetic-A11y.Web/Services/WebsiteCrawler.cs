@@ -46,6 +46,7 @@ public sealed class WebsiteCrawler(
         var scanAccessibility = run.ScanAccessibility && accessibilityScanner.IsEnabled;
         queue.Enqueue((root, 0));
         visited.Add(Normalize(root));
+        run.PagesDiscovered = visited.Count;
         var linkJobs = Channel.CreateUnbounded<(Guid Id, Uri BaseUrl, string[] Links)>(
             new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
         var pdfJobs = Channel.CreateUnbounded<Guid>(
@@ -88,9 +89,18 @@ public sealed class WebsiteCrawler(
                     else
                     {
                         using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
-                        if (!response.IsSuccessStatusCode) { run.FailedRequests++; continue; }
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            var protection = response.Headers.Server.Any(x =>
+                                string.Equals(x.Product?.Name, "cloudflare", StringComparison.OrdinalIgnoreCase))
+                                ? " Cloudflare may be blocking automated requests." : "";
+                            throw new HttpRequestException(
+                                $"HTTP {(int)response.StatusCode} ({response.ReasonPhrase}) while loading {url}.{protection}",
+                                null, response.StatusCode);
+                        }
                         var media = response.Content.Headers.ContentType?.MediaType;
-                        if (media is not null && !media.Contains("html", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (media is not null && !media.Contains("html", StringComparison.OrdinalIgnoreCase))
+                            throw new InvalidOperationException($"Expected an HTML page at {url}, but received {media}.");
                         html = await response.Content.ReadAsStringAsync(ct);
                     }
                     run.PagesCrawled++;
@@ -129,14 +139,15 @@ public sealed class WebsiteCrawler(
                     foreach (var candidate in ExtractResourceUrls(document))
                     {
                         ct.ThrowIfCancellationRequested();
-                        if (!Uri.TryCreate(baseUrl, candidate, out var target)) continue;
+                        if (!Uri.TryCreate(baseUrl, candidate.Url, out var target)) continue;
                         target = StripFragment(target);
                         if (target.Scheme is not ("http" or "https")) continue;
                         if (LooksLikePdf(target))
                         {
                             await DiscoverPdfAsync(db, run, target, url, pdfs, pdfJobs.Writer, ct);
                         }
-                        else if (depth < maxDepth && allowedHosts.Contains(target.Host))
+                        else if (candidate.CanCrawl && LooksLikePage(target) &&
+                                 depth < maxDepth && allowedHosts.Contains(target.Host))
                         {
                             var normalized = Normalize(target);
                             if (visited.Count < maxPages && visited.Add(normalized))
@@ -148,11 +159,13 @@ public sealed class WebsiteCrawler(
                     }
                     await db.SaveChangesAsync(ct);
                 }
-                catch (OperationCanceledException) { throw; }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
                 catch (Exception ex)
                 {
                     run.FailedRequests++;
                     logger.LogWarning(ex, "Failed crawling {Url}", url);
+                    if (depth == 0)
+                        run.Error = $"Root page could not be scanned: {ex.Message.Split('\n')[0]}";
                     if (run.RenderJavaScript)
                     {
                         run.Error = $"JavaScript scan failed for {url}: {ex.Message.Split('\n')[0]}";
@@ -185,6 +198,10 @@ public sealed class WebsiteCrawler(
                 await db.SaveChangesAsync(CancellationToken.None);
             }
         }
+
+        if (run.PagesCrawled == 0)
+            throw new InvalidOperationException(
+                $"No HTML pages could be scanned. {run.Error ?? "Check the root URL and the server's access restrictions."}");
     }
 
     private static async Task SetActivityAsync(DiscoveryDbContext db, DiscoveryRun run, string activity, CancellationToken ct)
@@ -250,7 +267,7 @@ public sealed class WebsiteCrawler(
                     else if (depth < 3 && item.Host == root.Host &&
                              item.AbsolutePath.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
                         pending.Enqueue((item, depth + 1));
-                    else if (run.MaxDepth >= 1 && allowed.Contains(item.Host) && item.Host == root.Host &&
+                    else if (LooksLikePage(item) && run.MaxDepth >= 1 && allowed.Contains(item.Host) && item.Host == root.Host &&
                              visited.Count < run.MaxPages && visited.Add(Normalize(item)))
                     {
                         queue.Enqueue((item, 1));
@@ -391,17 +408,26 @@ public sealed class WebsiteCrawler(
         return result;
     }
 
-    private static IEnumerable<string> ExtractResourceUrls(AngleSharp.Dom.IDocument doc)
+    private static IEnumerable<(string Url, bool CanCrawl)> ExtractResourceUrls(AngleSharp.Dom.IDocument doc)
     {
         foreach (var element in doc.QuerySelectorAll("a[href], area[href], iframe[src], frame[src], embed[src], object[data], source[src], link[href]"))
         {
             var value = element.GetAttribute("href") ?? element.GetAttribute("src") ?? element.GetAttribute("data");
-            if (!string.IsNullOrWhiteSpace(value)) yield return value;
+            if (!string.IsNullOrWhiteSpace(value))
+                yield return (value, element.LocalName is "a" or "area" or "iframe" or "frame");
         }
         foreach (var element in doc.QuerySelectorAll("[data-href], [data-url], [data-download-url]"))
             foreach (var attr in new[] { "data-href", "data-url", "data-download-url" })
-                if (element.HasAttribute(attr)) yield return element.GetAttribute(attr)!;
+                if (element.HasAttribute(attr)) yield return (element.GetAttribute(attr)!, true);
     }
+
+    private static bool LooksLikePage(Uri uri) =>
+        Path.GetExtension(uri.AbsolutePath).ToLowerInvariant() is not (
+            ".css" or ".js" or ".mjs" or ".map" or ".json" or ".xml" or ".txt" or
+            ".jpg" or ".jpeg" or ".png" or ".gif" or ".svg" or ".webp" or ".ico" or ".avif" or
+            ".woff" or ".woff2" or ".ttf" or ".otf" or ".eot" or
+            ".mp3" or ".mp4" or ".webm" or ".wav" or ".ogg" or ".mov" or
+            ".zip" or ".gz" or ".doc" or ".docx" or ".xls" or ".xlsx" or ".ppt" or ".pptx");
 
     private static bool LooksLikePdf(Uri uri) =>
         uri.AbsolutePath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) ||

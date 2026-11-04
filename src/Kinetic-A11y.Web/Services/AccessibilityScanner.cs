@@ -293,6 +293,13 @@ public sealed class AccessibilityScanner(
         try
         {
             if (_browser is { IsConnected: true }) return _browser;
+            if (_playwright is not null)
+            {
+                logger.LogWarning("Playwright browser disconnected; recreating the browser and driver before continuing.");
+                _browser = null;
+                _playwright.Dispose();
+                _playwright = null;
+            }
             _playwright ??= await Playwright.CreateAsync();
             try
             {
