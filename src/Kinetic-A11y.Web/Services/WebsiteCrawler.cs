@@ -33,10 +33,15 @@ public sealed class WebsiteCrawler(
         var maxDepth = run.MaxDepth;
         var maxPages = run.MaxPages;
         if (run.RenderJavaScript && run.JavaScriptWaitSeconds is < 0 or > 60)
+        {
             throw new InvalidOperationException("JavaScript wait must be between 0 and 60 seconds.");
+        }
+
         var allowedHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { root.Host };
         foreach (var host in _options.AllowedHosts.Where(x => !string.IsNullOrWhiteSpace(x)))
+        {
             allowedHosts.Add(host.Trim());
+        }
 
         var client = httpFactory.CreateClient("crawler");
         var queue = new Queue<(Uri Url, int Depth)>();
@@ -69,7 +74,11 @@ public sealed class WebsiteCrawler(
                     continue;
                 }
                 var (url, depth) = queue.Dequeue();
-                if (depth > maxDepth) continue;
+                if (depth > maxDepth)
+                {
+                    continue;
+                }
+
                 try
                 {
                     await Task.Delay(_options.DelayMilliseconds, ct);
@@ -100,7 +109,10 @@ public sealed class WebsiteCrawler(
                         }
                         var media = response.Content.Headers.ContentType?.MediaType;
                         if (media is not null && !media.Contains("html", StringComparison.OrdinalIgnoreCase))
+                        {
                             throw new InvalidOperationException($"Expected an HTML page at {url}, but received {media}.");
+                        }
+
                         html = await response.Content.ReadAsStringAsync(ct);
                     }
                     var parser = new HtmlParser();
@@ -134,13 +146,25 @@ public sealed class WebsiteCrawler(
                     var baseUrl = documentUrl;
                     if (run.RenderJavaScript &&
                         Uri.TryCreate(documentUrl, document.QuerySelector("base[href]")?.GetAttribute("href"), out var htmlBase) &&
-                        htmlBase.Scheme is "http" or "https") baseUrl = htmlBase;
+                        htmlBase.Scheme is "http" or "https")
+                    {
+                        baseUrl = htmlBase;
+                    }
+
                     foreach (var candidate in ExtractResourceUrls(document))
                     {
                         ct.ThrowIfCancellationRequested();
-                        if (!Uri.TryCreate(baseUrl, candidate.Url, out var target)) continue;
+                        if (!Uri.TryCreate(baseUrl, candidate.Url, out var target))
+                        {
+                            continue;
+                        }
+
                         target = StripFragment(target);
-                        if (target.Scheme is not ("http" or "https")) continue;
+                        if (target.Scheme is not ("http" or "https"))
+                        {
+                            continue;
+                        }
+
                         if (LooksLikePdf(target))
                         {
                             await DiscoverPdfAsync(db, run, target, url, pdfs, pdfJobs.Writer, ct);
@@ -166,8 +190,16 @@ public sealed class WebsiteCrawler(
                     var normalized = Normalize(url);
                     var quality = await db.PageQualityResults.SingleOrDefaultAsync(
                         x => x.DiscoveryRunId == run.Id && x.Url == normalized, ct);
-                    if (quality is not null) db.PageQualityResults.Remove(quality);
-                    if (depth == 0) run.Error = "Root page requires authentication (HTTP 401) and was excluded.";
+                    if (quality is not null)
+                    {
+                        db.PageQualityResults.Remove(quality);
+                    }
+
+                    if (depth == 0)
+                    {
+                        run.Error = "Root page requires authentication (HTTP 401) and was excluded.";
+                    }
+
                     await db.SaveChangesAsync(ct);
                 }
                 catch (Exception ex)
@@ -175,15 +207,21 @@ public sealed class WebsiteCrawler(
                     run.FailedRequests++;
                     logger.LogWarning(ex, "Failed crawling {Url}", url);
                     if (depth == 0)
+                    {
                         run.Error = $"Root page could not be scanned: {ex.Message.Split('\n')[0]}";
+                    }
+
                     if (run.RenderJavaScript)
                     {
                         run.Error = $"JavaScript scan failed for {url}: {ex.Message.Split('\n')[0]}";
                         if (scanAccessibility && scannedPages.Add(Normalize(url)))
+                        {
                             StoreAccessibility(db, run, url, new PageAccessibilityResult
                             {
                                 DiscoveryRunId = run.Id, Url = Normalize(url), Error = run.Error
                             });
+                        }
+
                         await db.SaveChangesAsync(ct);
                     }
                 }
@@ -197,7 +235,11 @@ public sealed class WebsiteCrawler(
         {
             linkJobs.Writer.TryComplete();
             pdfJobs.Writer.TryComplete();
-            if (!crawlFinished) await workersCancellation.CancelAsync();
+            if (!crawlFinished)
+            {
+                await workersCancellation.CancelAsync();
+            }
+
             try
             {
                 await Task.WhenAll(linkWorker, pdfWorker);
@@ -210,8 +252,10 @@ public sealed class WebsiteCrawler(
         }
 
         if (run.PagesCrawled == 0)
+        {
             throw new InvalidOperationException(
                 $"No HTML pages could be scanned. {run.Error ?? "Check the root URL and the server's access restrictions."}");
+        }
     }
 
     private static async Task SetActivityAsync(DiscoveryDbContext db, DiscoveryRun run, string activity, CancellationToken ct)
@@ -239,10 +283,15 @@ public sealed class WebsiteCrawler(
                     {
                         var trimmed = line.Trim();
                         if (trimmed.StartsWith("Sitemap:", StringComparison.OrdinalIgnoreCase))
+                        {
                             sitemapUrls.Add(trimmed["Sitemap:".Length..].Trim());
+                        }
                     }
                 }
-                else sitemapUrls.Add(candidate.AbsoluteUri);
+                else
+                {
+                    sitemapUrls.Add(candidate.AbsoluteUri);
+                }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
             catch (Exception ex)
@@ -253,14 +302,23 @@ public sealed class WebsiteCrawler(
 
         var pending = new Queue<(Uri Url, int Depth)>();
         foreach (var value in sitemapUrls)
-            if (Uri.TryCreate(value, UriKind.Absolute, out var uri)) pending.Enqueue((uri, 0));
+        {
+            if (Uri.TryCreate(value, UriKind.Absolute, out var uri))
+            {
+                pending.Enqueue((uri, 0));
+            }
+        }
 
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         while (pending.Count > 0 && seen.Count < 100)
         {
             ct.ThrowIfCancellationRequested();
             var (uri, depth) = pending.Dequeue();
-            if (!seen.Add(uri.AbsoluteUri)) continue;
+            if (!seen.Add(uri.AbsoluteUri))
+            {
+                continue;
+            }
+
             try
             {
                 await SetActivityAsync(db, run, $"Reading sitemap: {uri}", ct);
@@ -269,14 +327,20 @@ public sealed class WebsiteCrawler(
                 foreach (var loc in doc.Descendants().Where(x => x.Name.LocalName == "loc").Select(x => x.Value.Trim()))
                 {
                     ct.ThrowIfCancellationRequested();
-                    if (!Uri.TryCreate(loc, UriKind.Absolute, out var item)) continue;
+                    if (!Uri.TryCreate(loc, UriKind.Absolute, out var item))
+                    {
+                        continue;
+                    }
+
                     if (LooksLikePdf(item))
                     {
                         await DiscoverPdfAsync(db, run, item, uri, pdfs, pdfJobs, ct);
                     }
                     else if (depth < 3 && item.Host == root.Host &&
                              item.AbsolutePath.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
+                    {
                         pending.Enqueue((item, depth + 1));
+                    }
                     else if (LooksLikePage(item) && run.MaxDepth >= 1 && allowed.Contains(item.Host) && item.Host == root.Host &&
                              visited.Count < run.MaxPages && visited.Add(Normalize(item)))
                     {
@@ -325,8 +389,11 @@ public sealed class WebsiteCrawler(
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
             await db.SaveChangesAsync(ct);
             if (pdf.Status == DiscoveredPdfStatus.Valid)
+            {
                 await db.DiscoveryRuns.Where(x => x.Id == pdf.DiscoveryRunId)
                     .ExecuteUpdateAsync(s => s.SetProperty(x => x.PdfsValidated, x => x.PdfsValidated + 1), ct);
+            }
+
             await transaction.CommitAsync(ct);
         }
     }
@@ -335,7 +402,11 @@ public sealed class WebsiteCrawler(
         HashSet<string> seen, ChannelWriter<Guid> jobs, CancellationToken ct)
     {
         var key = Normalize(pdf);
-        if (!seen.Add(key)) return;
+        if (!seen.Add(key))
+        {
+            return;
+        }
+
         var record = new DiscoveredPdf
         {
             DiscoveryRunId = run.Id, Url = key, SourcePageUrl = source.AbsoluteUri,
@@ -369,7 +440,11 @@ public sealed class WebsiteCrawler(
                 using var response = await client.SendAsync(get, HttpCompletionOption.ResponseHeadersRead, ct);
                 contentType = response.Content.Headers.ContentType?.MediaType ?? contentType;
                 size ??= response.Content.Headers.ContentLength;
-                if (!response.IsSuccessStatusCode) { status = DiscoveredPdfStatus.Unavailable; message = $"HTTP {(int)response.StatusCode}"; }
+                if (!response.IsSuccessStatusCode)
+                {
+                    status = DiscoveredPdfStatus.Unavailable;
+                    message = $"HTTP {(int)response.StatusCode}";
+                }
                 else
                 {
                     await using var stream = await response.Content.ReadAsStreamAsync(ct);
@@ -379,9 +454,15 @@ public sealed class WebsiteCrawler(
                         ? DiscoveredPdfStatus.Valid : DiscoveredPdfStatus.Unverified;
                 }
             }
-            else status = DiscoveredPdfStatus.Valid;
+            else
+            {
+                status = DiscoveredPdfStatus.Valid;
+            }
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException or
                                    Polly.Timeout.TimeoutRejectedException or Polly.CircuitBreaker.BrokenCircuitException)
         {
@@ -414,7 +495,10 @@ public sealed class WebsiteCrawler(
             run.AverageAccessibilityScore = ((run.AverageAccessibilityScore ?? 0) * scored + score) / (scored + 1);
             run.PagesAccessibilityScanned++;
         }
-        else run.AccessibilityScanFailures++;
+        else
+        {
+            run.AccessibilityScanFailures++;
+        }
         return result;
     }
 
@@ -424,11 +508,20 @@ public sealed class WebsiteCrawler(
         {
             var value = element.GetAttribute("href") ?? element.GetAttribute("src") ?? element.GetAttribute("data");
             if (!string.IsNullOrWhiteSpace(value))
+            {
                 yield return (value, element.LocalName is "a" or "area" or "iframe" or "frame");
+            }
         }
         foreach (var element in doc.QuerySelectorAll("[data-href], [data-url], [data-download-url]"))
+        {
             foreach (var attr in new[] { "data-href", "data-url", "data-download-url" })
-                if (element.HasAttribute(attr)) yield return (element.GetAttribute(attr)!, true);
+            {
+                if (element.HasAttribute(attr))
+                {
+                    yield return (element.GetAttribute(attr)!, true);
+                }
+            }
+        }
     }
 
     private static bool LooksLikePage(Uri uri) =>
@@ -451,7 +544,10 @@ public sealed class WebsiteCrawler(
     {
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri) ||
             uri.Scheme is not ("http" or "https") || !string.IsNullOrEmpty(uri.UserInfo))
+        {
             throw new InvalidOperationException("Enter a valid public HTTP or HTTPS root URL.");
+        }
+
         return uri;
     }
 
@@ -464,7 +560,11 @@ public sealed class WebsiteCrawler(
     private static string Normalize(Uri uri)
     {
         var builder = new UriBuilder(uri) { Fragment = "" };
-        if (builder.Path.Length > 1) builder.Path = builder.Path.TrimEnd('/');
+        if (builder.Path.Length > 1)
+        {
+            builder.Path = builder.Path.TrimEnd('/');
+        }
+
         return builder.Uri.AbsoluteUri;
     }
 }

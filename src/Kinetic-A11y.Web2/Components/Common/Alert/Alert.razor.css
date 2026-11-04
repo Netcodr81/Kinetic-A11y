@@ -1,0 +1,23 @@
+﻿.btn-outline-info {
+    color: var(--theme-primary);
+    border-color: var(--theme-primary);
+    background-color: transparent;
+}
+
+.btn-outline-success {
+    color: #008236;
+    border-color: #008236;
+    background-color: transparent;
+}
+
+.btn-outline-warning {
+    color: #bb4d00;
+    border-color: #bb4d00;
+    background-color: transparent;
+}
+
+.btn-outline-error {
+    color: #9f0712;
+    border-color: #9f0712;
+    background-color: transparent;
+}

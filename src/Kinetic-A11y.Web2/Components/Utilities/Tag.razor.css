@@ -1,0 +1,9 @@
+.tag {
+   min-width: 100px;
+    padding: 0.3rem;
+    text-align: center;
+}
+
+.default {
+    display: inline-block;
+}

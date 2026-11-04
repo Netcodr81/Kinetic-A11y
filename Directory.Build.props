@@ -1,0 +1,18 @@
+﻿<Project>
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+
+        <!-- Configure code analysis. -->
+        <AnalysisLevel>latest</AnalysisLevel>
+        <AnalysisMode>All</AnalysisMode>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+        <CodeAnalysisTreatWarningsAsErrors>false</CodeAnalysisTreatWarningsAsErrors>
+        <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+        <WarningsNotAsErrors>NU1900;NU1902;CA1859;S1172;CS0168;CS0219;IDE0052;IDE0059;IDE0060;S125;S1481;CS8981</WarningsNotAsErrors>
+    </PropertyGroup>
+
+
+</Project>

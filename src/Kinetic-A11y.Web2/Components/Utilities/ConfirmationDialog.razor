@@ -1,0 +1,53 @@
+@if (Open)
+{
+    <div class="confirmation-overlay" @onclick="CancelAsync">
+        <dialog class="confirmation-dialog" open @onclick:stopPropagation>
+            <h2>@Title</h2>
+            <p>@Message</p>
+            <div class="dialog-actions">
+                <button class="dialog-button dialog-button-primary" type="button" @onclick="ConfirmAsync">@ConfirmText</button>
+                <button class="dialog-button dialog-button-secondary" type="button" @onclick="CancelAsync">@CancelText</button>
+            </div>
+        </dialog>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public bool Open { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> OpenChanged { get; set; }
+
+    [Parameter]
+    [EditorRequired]
+    public string Title { get; set; }
+
+    [Parameter]
+    [EditorRequired]
+    public string Message { get; set; }
+
+    [Parameter]
+    public string ConfirmText { get; set; } = "Confirm";
+
+    [Parameter]
+    public string CancelText { get; set; } = "Cancel";
+
+    [Parameter]
+    public EventCallback OnConfirm { get; set; }
+
+    [Parameter]
+    public EventCallback OnCancel { get; set; }
+
+    private async Task ConfirmAsync()
+    {
+        await OpenChanged.InvokeAsync(false);
+        await OnConfirm.InvokeAsync();
+    }
+
+    private async Task CancelAsync()
+    {
+        await OpenChanged.InvokeAsync(false);
+        await OnCancel.InvokeAsync();
+    }
+}

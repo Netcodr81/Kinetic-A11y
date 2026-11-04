@@ -46,7 +46,7 @@ public sealed class PageQualityResult
     /// </remarks>
     [NotMapped]
     public double? OverallScore => BrokenLinksScore is null || SeoScore is null ||
-        (AccessibilityEnabled && AccessibilityScore is null) ? null :
+        AccessibilityEnabled && AccessibilityScore is null ? null :
         AccessibilityEnabled
             ? (AccessibilityScore!.Value + BrokenLinksScore.Value + SeoScore.Value) / 3d
             : (BrokenLinksScore.Value + SeoScore.Value) / 2d;
@@ -57,7 +57,7 @@ public sealed class PageQualityResult
 /// <param name="RuleId">A stable identifier for the rule or issue type.</param>
 /// <param name="Message">A human-readable explanation of the finding.</param>
 /// <param name="Target">An optional DOM target associated with the finding.</param>
-public sealed record QualityIssue(string Category, string RuleId, string Message, string? Target = null);
+public sealed record QualityIssue(string Category, string RuleId, string Message, string? Target = null, string? WcagLevel = null);
 
 /// <summary>Calculates aggregate page counts and category averages for a site scan.</summary>
 public sealed class SiteQualitySummary(IEnumerable<PageQualityResult> results)
@@ -92,7 +92,7 @@ public sealed class SiteQualitySummary(IEnumerable<PageQualityResult> results)
     /// every enabled category has at least one successful result.
     /// </remarks>
     public double? Overall => Pages == 0 || BrokenLinks is null || Seo is null ||
-        (_pages.Any(x => x.AccessibilityEnabled) && Accessibility is null) ? null :
+        _pages.Any(x => x.AccessibilityEnabled) && Accessibility is null ? null :
         _pages.Any(x => x.AccessibilityEnabled)
             ? (Accessibility!.Value + BrokenLinks.Value + Seo.Value) / 3d
             : (BrokenLinks.Value + Seo.Value) / 2d;

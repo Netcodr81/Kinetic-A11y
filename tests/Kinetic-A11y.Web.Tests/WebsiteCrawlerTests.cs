@@ -44,7 +44,10 @@ public sealed class WebsiteCrawlerTests
                 var error = await Assert.ThrowsAsync<InvalidOperationException>(() => crawler.CrawlAsync(run.Id, CancellationToken.None));
                 Assert.Contains("requires authentication", error.Message);
             }
-            else await crawler.CrawlAsync(run.Id, CancellationToken.None);
+            else
+            {
+                await crawler.CrawlAsync(run.Id, CancellationToken.None);
+            }
 
             await db.Entry(run).ReloadAsync();
             Assert.Equal(0, run.FailedRequests);
@@ -52,7 +55,10 @@ public sealed class WebsiteCrawlerTests
             Assert.Equal(protectedRoot ? 0 : 1, run.PagesCrawled);
             Assert.Empty(await db.PageAccessibilityResults.ToListAsync());
             var quality = await db.PageQualityResults.ToListAsync();
-            if (protectedRoot) Assert.Empty(quality);
+            if (protectedRoot)
+            {
+                Assert.Empty(quality);
+            }
             else
             {
                 var page = Assert.Single(quality);

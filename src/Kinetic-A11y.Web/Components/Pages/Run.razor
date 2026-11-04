@@ -107,7 +107,9 @@ else
                             <ul>
                             @foreach (var issue in qualityIssues[quality.Id])
                             {
-                                <li><strong>@issue.Category:</strong> @issue.Message <code>@issue.RuleId</code>
+                                <li><strong>@issue.Category:</strong>
+                                    @if (issue.WcagLevel is not null) { <span>WCAG @issue.WcagLevel · </span> }
+                                    @issue.Message <code>@issue.RuleId</code>
                                     @if (issue.Target is not null) { <div><code>@issue.Target</code></div> }
                                 </li>
                             }
@@ -162,6 +164,7 @@ else
                                     {
                                         <li>
                                             <span class="impact impact-@v.Impact">@v.Impact</span>
+                                            @if (v.WcagLevel is not null) { <strong>WCAG @v.WcagLevel</strong> }
                                             <a href="@v.HelpUrl" target="_blank" rel="noopener noreferrer">@v.RuleId</a>
                                             — @v.Help (@v.NodeCount element@(v.NodeCount == 1 ? "" : "s"))
                                             @if (!string.IsNullOrWhiteSpace(v.PreviewPath))

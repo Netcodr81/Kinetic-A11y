@@ -34,7 +34,10 @@ public sealed class AccessibilityScanner(
         Guid runId, Uri url, int waitSeconds, bool scanAccessibility, CancellationToken ct)
     {
         if (waitSeconds is < 0 or > 60)
+        {
             throw new InvalidOperationException("JavaScript wait must be between 0 and 60 seconds.");
+        }
+
         var browser = await GetBrowserAsync(ct);
         ct.ThrowIfCancellationRequested();
         await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
@@ -54,12 +57,21 @@ public sealed class AccessibilityScanner(
             });
             ct.ThrowIfCancellationRequested();
             if (response?.Status == 401)
+            {
                 throw new HttpRequestException($"Authentication required while rendering {url}.", null, HttpStatusCode.Unauthorized);
+            }
+
             if (response is not null && !response.Ok)
+            {
                 throw new InvalidOperationException($"HTTP {response.Status} while rendering {url}.");
+            }
+
             var contentType = response is null ? null : await response.HeaderValueAsync("content-type");
             if (contentType is not null && !contentType.Contains("html", StringComparison.OrdinalIgnoreCase))
+            {
                 throw new InvalidOperationException($"Cannot render non-HTML content at {url}.");
+            }
+
             await Task.Delay(TimeSpan.FromSeconds(waitSeconds), ct);
             var html = await page.ContentAsync();
             var finalUrl = new Uri(page.Url);
@@ -114,7 +126,10 @@ public sealed class AccessibilityScanner(
             });
             ct.ThrowIfCancellationRequested();
             if (response?.Status == 401)
+            {
                 throw new HttpRequestException($"Authentication required while scanning {url}.", null, HttpStatusCode.Unauthorized);
+            }
+
             if (response is not null && !response.Ok)
             {
                 result.Error = $"HTTP {response.Status} when loading page in browser";
@@ -185,7 +200,7 @@ public sealed class AccessibilityScanner(
         // WCAG violations; the highest-impact rules with the most affected nodes are stored first.
         result.QualityIssues.AddRange(allViolations.Select(v => new QualityIssue(
             v.Tags.Any(t => t.StartsWith("wcag", StringComparison.Ordinal)) ? "Accessibility" : "Best Practices",
-            v.Id, v.Help, v.Nodes?.FirstOrDefault()?.Target?.ToString())));
+            v.Id, v.Help, v.Nodes?.FirstOrDefault()?.Target?.ToString(), GetWcagLevel(v.Tags))));
 
         var previewCount = 0;
         foreach (var v in violations
@@ -201,6 +216,7 @@ public sealed class AccessibilityScanner(
                 Description = v.Description,
                 Help = v.Help,
                 HelpUrl = Truncate(v.HelpUrl, 2048),
+                WcagLevel = GetWcagLevel(v.Tags),
                 NodeCount = v.Nodes?.Length ?? 0,
                 SampleTarget = Truncate(FormatTarget(node?.Target), MaxSnippetLength),
                 SampleHtml = Truncate(node?.Html, MaxSnippetLength)
@@ -250,7 +266,11 @@ public sealed class AccessibilityScanner(
     private static string? GetSingleSelector(IEnumerable<string> selectors)
     {
         using var enumerator = selectors.GetEnumerator();
-        if (!enumerator.MoveNext()) return null;
+        if (!enumerator.MoveNext())
+        {
+            return null;
+        }
+
         var selector = enumerator.Current;
         return enumerator.MoveNext() ? null : selector;
     }
@@ -259,7 +279,10 @@ public sealed class AccessibilityScanner(
     {
         ct.ThrowIfCancellationRequested();
         var element = page.Locator(selector).First;
-        if (await element.CountAsync() == 0) return null;
+        if (await element.CountAsync() == 0)
+        {
+            return null;
+        }
 
         await element.ScrollIntoViewIfNeededAsync(new LocatorScrollIntoViewIfNeededOptions
         {
@@ -295,11 +318,19 @@ public sealed class AccessibilityScanner(
 
     private async Task<IBrowser> GetBrowserAsync(CancellationToken ct)
     {
-        if (_browser is { IsConnected: true }) return _browser;
+        if (_browser is { IsConnected: true })
+        {
+            return _browser;
+        }
+
         await _browserLock.WaitAsync(ct);
         try
         {
-            if (_browser is { IsConnected: true }) return _browser;
+            if (_browser is { IsConnected: true })
+            {
+                return _browser;
+            }
+
             if (_playwright is not null)
             {
                 logger.LogWarning("Playwright browser disconnected; recreating the browser and driver before continuing.");
@@ -318,7 +349,11 @@ public sealed class AccessibilityScanner(
                 _installAttempted = true;
                 logger.LogWarning("Playwright Chromium not found; installing it now (one-time download)...");
                 var exitCode = await Task.Run(() => Microsoft.Playwright.Program.Main(["install", "chromium"]), ct);
-                if (exitCode != 0) throw new InvalidOperationException($"Playwright browser install failed with exit code {exitCode}.", ex);
+                if (exitCode != 0)
+                {
+                    throw new InvalidOperationException($"Playwright browser install failed with exit code {exitCode}.", ex);
+                }
+
                 _browser = await LaunchAsync();
             }
             return _browser;
@@ -332,13 +367,32 @@ public sealed class AccessibilityScanner(
     private static bool Is(string? impact, string expected) =>
         string.Equals(impact, expected, StringComparison.OrdinalIgnoreCase);
 
+    private static string? GetWcagLevel(IEnumerable<string> tags)
+    {
+        var level = tags
+            .Where(tag => tag.StartsWith("wcag", StringComparison.Ordinal))
+            .Select(tag => tag.EndsWith("aaa", StringComparison.Ordinal) ? "AAA"
+                : tag.EndsWith("aa", StringComparison.Ordinal) ? "AA"
+                : tag.EndsWith("a", StringComparison.Ordinal) ? "A"
+                : null)
+            .Where(level => level is not null)
+            .OrderByDescending(level => level switch { "AAA" => 3, "AA" => 2, _ => 1 })
+            .FirstOrDefault();
+
+        return level;
+    }
+
     private static string? Truncate(string? value, int max) =>
         value is null || value.Length <= max ? value : value[..max];
 
     /// <summary>Releases the shared Chromium browser, Playwright instance, and synchronization resource.</summary>
     public async ValueTask DisposeAsync()
     {
-        if (_browser is not null) await _browser.DisposeAsync();
+        if (_browser is not null)
+        {
+            await _browser.DisposeAsync();
+        }
+
         _playwright?.Dispose();
         _browserLock.Dispose();
     }

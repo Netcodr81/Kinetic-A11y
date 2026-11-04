@@ -1,0 +1,10 @@
+{
+  "scripts": {
+    "tailwind-build": "npx @tailwindcss/cli -i ./wwwroot/css/tailwind-input.css -o ./wwwroot/css/custom-components.css",
+    "tailwind-watch": "npx @tailwindcss/cli -i ./wwwroot/css/tailwind-input.css -o ./wwwroot/css/custom-components.css --watch"
+  },
+  "dependencies": {
+    "@tailwindcss/cli": "^4.3.4",
+    "tailwindcss": "^4.3.0"
+  }
+}

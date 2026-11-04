@@ -42,11 +42,16 @@ public sealed class PageQualityScanner(ILogger<PageQualityScanner> logger)
         };
         var issues = new List<QualityIssue>();
         if (string.IsNullOrWhiteSpace(document.Title))
+        {
             issues.Add(new("SEO", "missing-title", "Page title is missing or empty."));
+        }
+
         if (!document.QuerySelectorAll("meta[name]").Any(x =>
                 string.Equals(x.GetAttribute("name"), "description", StringComparison.OrdinalIgnoreCase) &&
                 !string.IsNullOrWhiteSpace(x.GetAttribute("content"))))
+        {
             issues.Add(new("SEO", "missing-description", "Meta description is missing or empty."));
+        }
 
         // SEO scoring currently covers only a nonempty page title and meta description.
         result.SeoScore = AccessibilityScoring.Calculate(issues.Where(x => x.Category == "SEO").Select(x => x.RuleId));
@@ -95,27 +100,44 @@ public sealed class PageQualityScanner(ILogger<PageQualityScanner> logger)
         {
             ct.ThrowIfCancellationRequested();
             var href = link.Trim();
-            if (href.Length == 0 || href.StartsWith('#')) continue;
+            if (href.Length == 0 || href.StartsWith('#'))
+            {
+                continue;
+            }
+
             if (!Uri.TryCreate(baseUri, href, out var target))
             {
                 issues.Add(new("Broken Links", $"invalid:{href}", "Invalid link URL.", href));
                 continue;
             }
-            if (target.Scheme is not ("http" or "https")) continue;
+            if (target.Scheme is not ("http" or "https"))
+            {
+                continue;
+            }
             // Fragments identify positions within a page, not separate network resources.
             var key = new UriBuilder(target) { Fragment = "" }.Uri.AbsoluteUri;
-            if (!targets.Add(key)) continue;
+            if (!targets.Add(key))
+            {
+                continue;
+            }
+
             if (!_linkChecks.TryGetValue(key, out var check))
             {
                 check = await CheckLinkAsync(new Uri(key), client, ct);
                 _linkChecks.Add(key, check);
             }
             if (check.Status == LinkStatus.RequiresAuthentication)
+            {
                 issues.Add(new("Excluded", key, "Requires authentication (HTTP 401); excluded from link scoring.", key));
+            }
             else if (check.Status == LinkStatus.Broken)
+            {
                 issues.Add(new("Broken Links", key, check.Error ?? "Broken link.", key));
+            }
             else if (check.Status == LinkStatus.Inconclusive)
+            {
                 errors.Add($"{key}: {check.Error}");
+            }
         }
         result.LinkCheckError = errors.Count == 0 ? null : string.Join("\n", errors);
         // Only confirmed broken URLs lower the score. If any check was inconclusive, leave the
@@ -132,11 +154,18 @@ public sealed class PageQualityScanner(ILogger<PageQualityScanner> logger)
         {
             using var head = new HttpRequestMessage(HttpMethod.Head, url);
             using var response = await client.SendAsync(head, HttpCompletionOption.ResponseHeadersRead, ct);
-            if (response.IsSuccessStatusCode) return (LinkStatus.Available, null);
+            if (response.IsSuccessStatusCode)
+            {
+                return (LinkStatus.Available, null);
+            }
+
             // HEAD is not consistently supported; confirm failures using GET without reading the body.
             using var get = new HttpRequestMessage(HttpMethod.Get, url);
             using var fallback = await client.SendAsync(get, HttpCompletionOption.ResponseHeadersRead, ct);
-            if (fallback.IsSuccessStatusCode) return (LinkStatus.Available, null);
+            if (fallback.IsSuccessStatusCode)
+            {
+                return (LinkStatus.Available, null);
+            }
             var message = $"HTTP {(int)fallback.StatusCode}";
             if (fallback.StatusCode == HttpStatusCode.Unauthorized)
             {
@@ -145,7 +174,10 @@ public sealed class PageQualityScanner(ILogger<PageQualityScanner> logger)
             }
             // Treat only clear missing-resource responses as broken; other failures may be temporary,
             // access-controlled, or unsupported and therefore cannot be scored confidently.
-            if (fallback.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone) return (LinkStatus.Broken, message);
+            if (fallback.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.Gone)
+            {
+                return (LinkStatus.Broken, message);
+            }
             logger.LogWarning("Link check inconclusive for {Url}: {Status}", url, fallback.StatusCode);
             return (LinkStatus.Inconclusive, message);
         }

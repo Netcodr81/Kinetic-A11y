@@ -1,0 +1,32 @@
+﻿@page "/not-found"
+@inject NavigationManager NavigationManager
+
+<PageTitle>Page Not Found</PageTitle>
+
+<section class="not-found-page">
+    <div class="not-found-shell">
+        <div class="not-found-card">
+            <p class="not-found-eyebrow">CIO AIM</p>
+            <h1 class="not-found-code">
+                <span class="not-found-code-prefix">Error</span>
+                404
+            </h1>
+            <h2 class="not-found-title">We couldn't find that page.</h2>
+            <p class="not-found-description">
+                The page may have moved, the link may be outdated, or the address may have been entered incorrectly.
+                Return to the assessment homepage to continue.
+            </p>
+            <div class="not-found-actions">
+                <button type="button" class="btn btn-primary" @onclick="NavigateHome">Go to home</button>
+            </div>
+        </div>
+    </div>
+</section>
+
+@code
+{
+    private void NavigateHome()
+    {
+        NavigationManager.NavigateTo("/", forceLoad: true);
+    }
+}

@@ -1,0 +1,48 @@
+﻿<div class="circle-container" style="width: @(Size)px; height: @(Size)px;">
+    <svg viewBox="0 0 36 36" class="circular-chart">
+        <!-- Background Circle -->
+        <path class="circle-bg"
+              d="M18 2.0845
+        a 15.9155 15.9155 0 0 1 0 31.831
+        a 15.9155 15.9155 0 0 1 0 -31.831"/>
+
+        <!-- Progress Circle -->
+        <path class="circle"
+              stroke-dasharray="@ClampedPercentage, 100"
+              stroke="@Color"
+              d="M18 2.0845
+        a 15.9155 15.9155 0 0 1 0 31.831
+        a 15.9155 15.9155 0 0 1 0 -31.831"/>
+    </svg>
+
+    @if (ChildContent is not null)
+    {
+        <div class="percentage" style="color: @TextColor;">
+            @ChildContent
+        </div>
+    }
+    else
+    {
+        <div class="percentage" style="color: @TextColor;">
+            @ClampedPercentage%
+        </div>
+    }
+
+</div>
+
+@code {
+    [Parameter] public double Percentage { get; set; }
+
+    [Parameter] public int Size { get; set; } = 150; // Default width/height in pixels
+
+    [Parameter] public string Color { get; set; } = "#3c81e8"; // Default progress color
+
+    [Parameter] public string TextColor { get; set; } = "#333333"; // Default text color
+
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    // Restrict the value between 0 and 100 to prevent SVG rendering issues
+    private double ClampedPercentage => Math.Clamp(Percentage, 0, 100);
+
+
+}

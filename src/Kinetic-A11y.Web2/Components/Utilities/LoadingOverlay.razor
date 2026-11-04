@@ -1,0 +1,40 @@
+﻿@using Kinetic_A11y.Web2.Web.Common.Services
+@implements IDisposable
+@inject LoadingService LoadingService
+
+
+@if (LoadingService.IsVisible)
+{
+  
+    <div class="loading-overlay">
+        <div class="loading-backdrop"></div>
+
+        <div class="loading-content">
+            <div class="cio-progress-loader">
+                <div class="cio-progress-bar"></div>
+            </div>
+
+            <div class="loading-message">
+                @LoadingService.Message
+            </div>
+        </div>
+    </div>
+}
+
+@code
+{
+    protected override void OnInitialized()
+    {
+        LoadingService.StateChanged += OnStateChanged;
+    }
+
+    private void OnStateChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    public void Dispose()
+    {
+        LoadingService.StateChanged -= OnStateChanged;
+    }
+}

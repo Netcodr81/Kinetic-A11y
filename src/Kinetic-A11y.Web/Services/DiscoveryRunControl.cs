@@ -71,7 +71,9 @@ public sealed class DiscoveryRunControl(
             var previous = await db.DiscoveryRuns.SingleOrDefaultAsync(x => x.Id == runId)
                 ?? throw new InvalidOperationException("This discovery run no longer exists.");
             if (_active.ContainsKey(runId) || previous.Status is DiscoveryRunStatus.Queued or DiscoveryRunStatus.Running)
+            {
                 throw new InvalidOperationException("Cancel the scan before starting it again.");
+            }
 
             var replacement = new DiscoveryRun
             {
@@ -106,7 +108,11 @@ public sealed class DiscoveryRunControl(
         {
             await using var db = await dbFactory.CreateDbContextAsync(stoppingToken);
             var run = await db.DiscoveryRuns.SingleOrDefaultAsync(x => x.Id == runId, stoppingToken);
-            if (run is null || run.Status != DiscoveryRunStatus.Queued) return;
+            if (run is null || run.Status != DiscoveryRunStatus.Queued)
+            {
+                return;
+            }
+
             run.Status = DiscoveryRunStatus.Running;
             run.StartedAt = DateTimeOffset.UtcNow;
             await db.SaveChangesAsync(stoppingToken);

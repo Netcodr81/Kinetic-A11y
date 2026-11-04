@@ -31,7 +31,10 @@ public sealed class IssuePreviewStore(
     public void DeleteRun(Guid runId)
     {
         var directory = Path.Combine(_rootDirectory, runId.ToString("N"));
-        if (!Directory.Exists(directory)) return;
+        if (!Directory.Exists(directory))
+        {
+            return;
+        }
 
         try
         {

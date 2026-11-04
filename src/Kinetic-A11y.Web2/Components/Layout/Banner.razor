@@ -1,0 +1,121 @@
+@using BlazorBlueprint.Icons.Lucide.Components
+@using Microsoft.AspNetCore.Components.Authorization
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+
+<div class="cio-banner">
+    <div class="cio-banner__section">
+        <div class="cio-banner__container shell-container">
+            <div class="cio-banner__identity">
+                <img src="/icons/nebraska-icon.svg" width="19" height="13" alt="Official government website"
+                     class="cio-banner__icon"/>
+
+                <p class="cio-banner__text mb-0">An official website of the State of Nebraska</p>
+            </div>
+
+            <div class="cio-banner__actions">
+                <AuthorizeView>
+                    <Authorized>
+                        <div class="banner-user-dropdown">
+                            <button id="user-menu-button" type="button"
+                                    @onclick="ToggleUserMenu"
+                                    @onclick:stopPropagation="true"
+                                    aria-expanded="@IsUserMenuOpen"
+                                    class="dropdown-toggle cio__dropdown banner-user-dropdown-toggle">
+                                <span class="banner-user-dropdown-content">
+                                    <LucideIcon Name="circle-user" Size="24" Class="text-white" AriaLabel="User Profile Logo" />
+                                    <span class="banner-user-dropdown-name text-sm">@GetDisplayName(context.User)</span>
+                                    <span class="banner-user-dropdown-chevron @(IsUserMenuOpen ? "banner-user-dropdown-chevron-open" : string.Empty)" aria-hidden="true">
+                                        <LucideIcon Name="chevron-down" Size="18" />
+                                    </span>
+                                </span>
+                            </button>
+
+                            @if (IsUserMenuOpen)
+                            {
+                                <div id="user-menu" class="cio__dropdown-list banner-user-dropdown-panel">
+                                    <ul class="banner-user-dropdown-links">
+                                        <li>
+                                            <form method="post" action="/auth/logout">
+                                                <button type="submit" class="banner-user-dropdown-action">
+                                                    <span class="font-semibold">Logout</span>
+                                                </button>
+                                            </form>
+                                        </li>
+                                    </ul>
+                                </div>
+                            }
+                        </div>
+                    </Authorized>                   
+                </AuthorizeView>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private bool IsUserMenuOpen { get; set; }
+    private DotNetObjectReference<Banner>? _dotNetRef;
+    private IJSObjectReference? module;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            module = await JS.InvokeAsync<IJSObjectReference>("import", "./Components/Layout/Banner.razor.js");
+            await module.InvokeVoidAsync("register", _dotNetRef);
+        }
+    }
+
+    private void ToggleUserMenu()
+    {
+        IsUserMenuOpen = !IsUserMenuOpen;
+    }
+
+    [JSInvokable]
+    public void CloseMenu()
+    {
+        if (IsUserMenuOpen)
+        {
+            IsUserMenuOpen = false;
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (module is not null)
+        {
+            try
+            {
+                await module.InvokeVoidAsync("dispose");
+                await module.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                module = null;
+            }
+        }
+
+        if (_dotNetRef is not null)
+        {
+            _dotNetRef.Dispose();
+            _dotNetRef = null;
+        }
+    }
+
+    private static string GetDisplayName(System.Security.Claims.ClaimsPrincipal user)
+    {
+        var name = user.Identity?.Name;
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            return name;
+        }
+
+        return user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+            ?? user.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+            ?? "User";
+    }
+}

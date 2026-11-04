@@ -1,0 +1,25 @@
+<div class="progress-track @Class" style="height:@Height; background-color:@TrackColor; border-radius:9999px; overflow:hidden;">
+    <div class="progress-fill" style="width:@($"{Percentage}%"); background-color:@BarColor; height:100%; border-radius:9999px;"></div>
+</div>
+
+@code {
+    [Parameter]
+    public double Value { get; set; }
+
+    [Parameter]
+    public double Max { get; set; } = 100;
+
+    [Parameter]
+    public string BarColor { get; set; } = "#018034";
+
+    [Parameter]
+    public string TrackColor { get; set; } = "#e2e8f0";
+
+    [Parameter]
+    public string Height { get; set; } = "8px";
+
+    [Parameter]
+    public string? Class { get; set; }
+
+    private double Percentage => Max <= 0 ? 0 : Math.Clamp(Value / Max * 100d, 0d, 100d);
+}

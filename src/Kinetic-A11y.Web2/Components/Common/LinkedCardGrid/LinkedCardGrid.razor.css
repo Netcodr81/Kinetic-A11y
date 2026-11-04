@@ -1,0 +1,13 @@
+﻿.linked-card-grid {
+    --linked-card-columns: 3;
+    display: grid;
+    grid-template-columns: repeat(var(--linked-card-columns), minmax(0, 1fr));
+    gap: 1rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.linked-card-grid__item {
+    height: 100%;
+}

@@ -1,0 +1,52 @@
+﻿
+@using Kinetic_A11y.Web2.Web.Components.Common.LinkedCardGrid
+@using Microsoft.AspNetCore.Components
+
+@if (HasItems)
+{
+    <ul class="linked-card-grid @Class"
+        data-columns="@Columns"
+        style="@StyleAttribute"
+        @attributes="AdditionalAttributes">
+        @foreach (var item in ResolvedItems)
+        {
+            <li class="linked-card-grid__item">
+                <LinkedCard Heading="@item.Heading"
+                            Text="@item.Text"
+                            Href="@item.Url"
+                            Target="@item.Target"
+                            Disabled="@item.Disabled"
+                            IconContent="@item.IconContent"
+                            BackgroundImageUrl="@item.BackgroundImageUrl"
+                            HeadingColor="@item.HeadingColor"
+                            HeadingHoverColor="@item.HeadingHoverColor"
+                            TextColor="@item.TextColor"
+                            TextHoverColor="@item.TextHoverColor"
+                            BackgroundColor="@item.BackgroundColor"
+                            IconColor="@item.IconColor"
+                            IconHoverColor="@item.IconHoverColor"
+                            BorderColor="@item.BorderColor" />
+            </li>
+        }
+    </ul>
+}
+
+@code {
+    [Parameter]
+    public IEnumerable<LinkedCardGridItem>? Items { get; set; }
+
+    [Parameter]
+    public int Columns { get; set; } = 3;
+
+    [Parameter]
+    public string? Class { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public IReadOnlyDictionary<string, object>? AdditionalAttributes { get; set; }
+
+    private IEnumerable<LinkedCardGridItem> ResolvedItems => Items ?? [];
+
+    private bool HasItems => ResolvedItems.Any();
+
+    private string StyleAttribute => $"--linked-card-columns:{Columns};";
+}

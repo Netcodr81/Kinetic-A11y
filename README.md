@@ -73,6 +73,8 @@ Settings are in `src/Kinetic-A11y.Web/appsettings.json`:
 
 Issue previews are captured for the highest-impact stored WCAG violations when their target can be located in the scanned page. PNG files are stored outside the web root; only their generated relative paths are stored in SQLite. Previews are removed when a run is deleted or replaced. Screenshots can contain sensitive page content, so keep the app and preview directory within a trusted environment.
 
+WCAG findings display their highest tagged conformance level (A, AA, or AAA) in the issue details and accessibility CSV export. Best Practices and non-WCAG quality issues have no WCAG level.
+
 ## Accessibility scan levels
 
 `Accessibility:Tags` selects groups of axe-core rules, not a certification target. WCAG conformance levels are cumulative: Level AA includes Level A requirements, and Level AAA includes A and AA. Tags themselves select rule groups; selecting a newer version or higher level alone does not automatically include all earlier-version and lower-level groups.

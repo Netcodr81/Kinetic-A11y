@@ -1,0 +1,24 @@
+﻿.stylized-header {
+    font-size: var(--stylized-header-font-size, 1.99rem);
+    line-height: 1.2;
+    font-weight: 700;
+    margin-bottom: 2.5rem;
+    cursor: pointer;
+    color: var(--stylized-header-text-color, #000);
+}
+
+.stylized-header:after {
+    display: block;
+    width: 5rem;
+    max-width: 100%;
+    height: 4px;
+    margin-top: 1.5rem;
+    background-color: var(--stylized-header-underline-color, var(--theme-secondary));
+    content: "";
+}
+
+@media (max-width: 767px) {
+    .stylized-header {
+        font-size: 1.86rem;
+    }
+}

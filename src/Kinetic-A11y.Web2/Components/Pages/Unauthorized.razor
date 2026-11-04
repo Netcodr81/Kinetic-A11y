@@ -1,0 +1,72 @@
+﻿@page "/unauthorized"
+@page "/auth/access-denied"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.WebUtilities
+@attribute [AllowAnonymous]
+@inject NavigationManager NavigationManager
+@layout Layout.UnauthorizedLayout
+
+<PageTitle>Unauthorized</PageTitle>
+
+<section class="unauthorized-page">
+    <div class="unauthorized-shell">
+        <div class="unauthorized-card">
+            <p class="unauthorized-eyebrow">CIO AIM</p>
+            <h1 class="unauthorized-code">
+                <span class="unauthorized-code-prefix">Error</span>
+                401
+            </h1>
+            <h2 class="unauthorized-title">You are not authorized to view this resource.</h2>
+            <p class="unauthorized-description">
+                If you believe you should have access to this resource contact your manager.
+            </p>  
+            
+             <AuthorizeView>
+                <Authorized Context="authState">
+                    @if (!string.IsNullOrWhiteSpace(_returnUrl))
+                    {
+                        <div class="unauthorized-actions">
+                            <button type="button" class="btn btn-primary" @onclick="GoBackToReturnUrl">
+                                Return to previous page
+                            </button>
+                        </div>
+                    }
+                </Authorized>
+            </AuthorizeView>
+        </div>
+    </div>
+</section>
+
+@code
+{
+    private string? _returnUrl;
+
+    protected override void OnInitialized()
+    {
+        var uri = NavigationManager.ToAbsoluteUri(NavigationManager.Uri);
+        var query = QueryHelpers.ParseQuery(uri.Query);
+
+        if (!query.TryGetValue("returnUrl", out var returnUrlValue))
+        {
+            return;
+        }
+
+        var decoded = Uri.UnescapeDataString(returnUrlValue.ToString());
+
+        if (Uri.TryCreate(decoded, UriKind.Relative, out _) && decoded.StartsWith('/'))
+        {
+            _returnUrl = decoded;
+        }
+    }
+
+    private void GoBackToReturnUrl()
+    {
+        if (string.IsNullOrWhiteSpace(_returnUrl))
+        {
+            return;
+        }
+
+        NavigationManager.NavigateTo(_returnUrl, forceLoad: true);
+    }
+}

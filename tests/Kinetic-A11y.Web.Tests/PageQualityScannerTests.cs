@@ -31,7 +31,10 @@ public sealed class PageQualityScannerTests
         Assert.Equal(hasError, result.LinkCheckError is not null);
         Assert.Equal(score is null ? null : (100 + score) / 2d, result.OverallScore);
         var issues = JsonSerializer.Deserialize<List<QualityIssue>>(result.IssuesJson)!;
-        if (category is null) Assert.Empty(issues);
+        if (category is null)
+        {
+            Assert.Empty(issues);
+        }
         else
         {
             var issue = Assert.Single(issues);
@@ -86,7 +89,7 @@ public sealed class PageQualityScannerTests
         using var handler = new LinkHandler(_ => new HttpResponseMessage(HttpStatusCode.OK));
         using var client = new HttpClient(handler);
         using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
+        await cancellation.CancelAsync();
         var result = Result();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>

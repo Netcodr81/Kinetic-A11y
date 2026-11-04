@@ -1,0 +1,63 @@
+﻿.return-to-anchor-btn__container {
+    display: block;
+}
+
+.return-to-anchor-btn__button {
+    border-radius: calc(1px * infinity);
+    width: fit-content;
+    padding-block: .3rem;
+    padding-inline: .8rem;
+    font-size: .99rem;
+    font-weight: 600;
+    display: flex;
+    gap: .5rem;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid transparent;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .return-to-anchor-btn__button {
+        transition: background-color 0.3s ease-in-out;
+    }
+}
+
+.return-to-anchor-btn__button:hover {
+    text-decoration: none;
+}
+
+.return-to-anchor-btn__button:focus-visible {
+    outline: 2px solid #005fcc;
+    outline-offset: 2px;
+}
+
+.return-to-anchor-btn__primary {
+    background-color: var(--theme-dark);
+    color: #fff;
+    border-color: var(--theme-dark);
+}
+
+.return-to-anchor-btn__secondary {
+    background-color: var(--theme-secondary);
+    color: #1b1b1b;
+    border-color: var(--theme-secondary);
+}
+
+.return-to-anchor-btn__outline {
+    color: var(--theme-dark);
+    border-color: var(--theme-dark);
+    background-color: transparent;
+}
+
+.return-to-anchor-btn__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.return-to-anchor-btn__text {
+    display: inline-flex;
+    align-items: center;
+}

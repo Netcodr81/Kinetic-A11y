@@ -1,0 +1,186 @@
+﻿@using BlazorBlueprint.Icons.Lucide.Components
+@using Kinetic_A11y.Web2.Web.Components.Common.LinkedCardGrid
+
+@if (IsInteractive)
+{
+    <a href="@ResolvedHref"
+       target="@ResolvedTarget"
+       rel="@RelAttribute"
+       class="linked-card__container @ContainerClass"
+       style="@StyleAttribute"
+       @attributes="AdditionalAttributes"
+       aria-label="@AccessibleLabel">
+        <h2 class="linked-card__heading">@Heading</h2>
+
+        @if (!string.IsNullOrWhiteSpace(Text))
+        {
+            <div class="linked-card__text">@Text</div>
+        }
+
+        @if (IconContent is not null)
+        {
+            <div class="linked-card__link" aria-hidden="@IconAriaHidden" style="@IconStyle">
+                <DynamicComponent Type="@typeof(LucideIcon)" Parameters="@IconParameters" />
+            </div>
+        }
+    </a>
+}
+else
+{
+    <div class="linked-card__container linked-card__container--disabled @ContainerClass"
+         style="@StyleAttribute"
+         @attributes="AdditionalAttributes"
+         aria-disabled="true">
+        <h2 class="linked-card__heading">@Heading</h2>
+
+        @if (!string.IsNullOrWhiteSpace(Text))
+        {
+            <div class="linked-card__text">@Text</div>
+        }
+
+        @if (IconContent is not null)
+        {
+            <div class="linked-card__link" aria-hidden="@IconAriaHidden" style="@IconStyle">
+                <DynamicComponent Type="@typeof(LucideIcon)" Parameters="@IconParameters" />
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter]
+    public string Heading { get; set; } = string.Empty;
+
+    [Parameter]
+    public string? Text { get; set; }
+
+    [Parameter]
+    public string? Href { get; set; }
+
+    [Parameter]
+    public string? Target { get; set; }
+
+    [Parameter]
+    public string? LinkUrl { get; set; }
+
+    [Parameter]
+    public string LinkTarget { get; set; } = "_self";
+
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    [Parameter]
+    public Icon? IconContent { get; set; }
+
+    [Parameter]
+    public string? BackgroundImageUrl { get; set; }
+
+    [Parameter]
+    public string? HeadingColor { get; set; }
+
+    [Parameter]
+    public string? HeadingHoverColor { get; set; }
+
+    [Parameter]
+    public string? TextColor { get; set; }
+
+    [Parameter]
+    public string? TextHoverColor { get; set; }
+
+    [Parameter]
+    public string? BackgroundColor { get; set; }
+
+    [Parameter]
+    public string? IconColor { get; set; }
+
+    [Parameter]
+    public string? IconHoverColor { get; set; }
+
+    [Parameter]
+    public string? BorderColor { get; set; } = "#ffc44d";
+
+    [Parameter]
+    public string? ContainerClass { get; set; }
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public IReadOnlyDictionary<string, object>? AdditionalAttributes { get; set; }
+
+    private bool IsInteractive => !Disabled && !string.IsNullOrWhiteSpace(ResolvedHref);
+
+    private bool HasVisibleText => !string.IsNullOrWhiteSpace(Heading) || !string.IsNullOrWhiteSpace(Text);
+
+    private string? AccessibleLabel => HasVisibleText
+        ? null
+        : Heading ?? Text ?? "Open card";
+
+    private string? ResolvedHref => Href ?? LinkUrl;
+
+    private string ResolvedTarget => Target ?? LinkTarget;
+
+    private string RelAttribute => string.Equals(ResolvedTarget, "_blank", StringComparison.OrdinalIgnoreCase)
+        ? "noopener noreferrer"
+        : string.Empty;
+
+    private string IconAriaHidden => HasVisibleText ? "true" : "false";
+
+    private string IconStyle => string.IsNullOrWhiteSpace(IconColor)
+        ? string.Empty
+        : $"color: {IconColor};";
+
+    private IDictionary<string, object> IconParameters => new Dictionary<string, object>
+    {
+        {
+            "Name", IconContent?.Name ?? string.Empty
+        },
+        {
+            "Color", IconContent?.Color ?? "currentColor"
+        },
+        {
+            "Size", IconContent?.Size ?? 24
+        },
+        {
+            "StrokeWidth", IconContent?.StrokeWidth ?? 2.0
+        },
+        {
+            "Fill", IconContent?.Fill ?? "none" 
+        },
+        {
+            "Class", IconContent?.Class ?? string.Empty
+        },
+        {
+            "AriaLabel", IconContent?.AriaLabel ?? string.Empty
+        },
+        {
+            "AdditionalAttributes", IconContent?.AdditionalAttributes ?? new Dictionary<string, object>()
+        }
+    };
+
+    private string StyleAttribute => string.Join(" ", new[]
+    {
+        BuildBackgroundImageStyle(),
+        BuildCssVariablesStyle()
+    }.Where(static value => !string.IsNullOrWhiteSpace(value)));
+
+    private string BuildBackgroundImageStyle() => string.IsNullOrWhiteSpace(BackgroundImageUrl)
+        ? string.Empty
+        : $"background-image:url('{BackgroundImageUrl}');";
+
+    private string BuildCssVariablesStyle()
+    {
+        var themeBorderColor = BorderColor;
+        if (string.IsNullOrWhiteSpace(themeBorderColor))
+        {
+            themeBorderColor = "#ffc44d";
+        }
+
+        return $@"
+--linked-card-heading-color: {HeadingColor ?? "#00607f"};
+--linked-card-heading-hover-color: {HeadingHoverColor ?? "#00607f"};
+--linked-card-text-color: {TextColor ?? "#00607f"};
+--linked-card-text-hover-color: {TextHoverColor ?? "#00607f"};
+--linked-card-background-color: {BackgroundColor ?? "#ffffff"};
+--linked-card-icon-color: {IconColor ?? "#00607f"};
+--linked-card-icon-hover-color: {IconHoverColor ?? "#00607f"};
+--linked-card-border-color: {themeBorderColor};".Trim();
+    }
+}
