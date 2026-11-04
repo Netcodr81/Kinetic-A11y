@@ -355,7 +355,7 @@ public sealed class WebsiteCrawler(
             else status = DiscoveredPdfStatus.Valid;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
-        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException)
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException or Polly.Timeout.TimeoutRejectedException)
         {
             logger.LogWarning(ex, "PDF validation failed for {Url}", pdf);
             message = ex.Message;
