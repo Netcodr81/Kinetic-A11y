@@ -435,3 +435,7 @@ FodyWeavers.xsd
 /src/Kinetic-A11y.Web/.idea/.idea.PdfDiscovery.dir/.idea/.name
 /src/Kinetic-A11y.Web/.idea/.idea.PdfDiscovery.dir/.idea/encodings.xml
 /src/Kinetic-A11y.Web/.idea/.idea.PdfDiscovery.dir/.idea/indexLayout.xml
+/src/Kinetic-A11y.Web/App_Data/
+/src/Kinetic-A11y.Web/pdf-discovery.db
+/src/Kinetic-A11y.Web/pdf-discovery.db-shm
+/src/Kinetic-A11y.Web/pdf-discovery.db-wal
