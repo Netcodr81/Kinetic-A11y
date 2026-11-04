@@ -9,6 +9,7 @@ using Microsoft.Extensions.Options;
 
 namespace Kinetic;
 
+/// <summary>Crawls a website for PDF documents and optionally evaluates pages for quality and accessibility.</summary>
 public sealed class WebsiteCrawler(
     IHttpClientFactory httpFactory,
     IDbContextFactory<DiscoveryDbContext> dbFactory,
@@ -19,6 +20,9 @@ public sealed class WebsiteCrawler(
 {
     private readonly CrawlerOptions _options = options.Value;
 
+    /// <summary>Discovers pages and PDFs for a saved run and persists crawl and scan results.</summary>
+    /// <param name="runId">The identifier of the discovery run to execute.</param>
+    /// <param name="ct">A token that cancels page crawling and its background checks.</param>
     public async Task CrawlAsync(Guid runId, CancellationToken ct)
     {
         using var workersCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);

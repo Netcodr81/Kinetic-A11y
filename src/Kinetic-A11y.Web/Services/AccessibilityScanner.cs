@@ -6,6 +6,7 @@ using Microsoft.Playwright;
 
 namespace Kinetic;
 
+/// <summary>Loads pages in Chromium and maps axe-core findings to discovery result models.</summary>
 public sealed class AccessibilityScanner(
     IOptions<AccessibilityOptions> options,
     ILogger<AccessibilityScanner> logger) : IAsyncDisposable
@@ -17,8 +18,16 @@ public sealed class AccessibilityScanner(
     private IBrowser? _browser;
     private bool _installAttempted;
 
+    /// <summary>Gets whether accessibility checks are globally enabled by configuration.</summary>
     public bool IsEnabled => _options.Enabled;
 
+    /// <summary>Renders a page and optionally checks its accessibility in the same browser page.</summary>
+    /// <param name="runId">The discovery run that owns the result.</param>
+    /// <param name="url">The page URL to load.</param>
+    /// <param name="waitSeconds">Additional time to wait after DOM content loads, from 0 to 60 seconds.</param>
+    /// <param name="scanAccessibility">Whether to run axe-core checks when the global setting is enabled.</param>
+    /// <param name="ct">A token that cancels navigation, waiting, and scanning.</param>
+    /// <returns>The rendered HTML, final browser URL, and an optional accessibility result.</returns>
     public async Task<(string Html, Uri FinalUrl, PageAccessibilityResult? Accessibility)> RenderAsync(
         Guid runId, Uri url, int waitSeconds, bool scanAccessibility, CancellationToken ct)
     {
@@ -72,6 +81,11 @@ public sealed class AccessibilityScanner(
         }
     }
 
+    /// <summary>Loads a page in Chromium and records its axe-core accessibility findings.</summary>
+    /// <param name="runId">The discovery run that owns the result.</param>
+    /// <param name="url">The page URL to scan.</param>
+    /// <param name="ct">A token that cancels navigation and scanning.</param>
+    /// <returns>The page result, including an error instead of a score if the scan fails.</returns>
     public async Task<PageAccessibilityResult> ScanAsync(Guid runId, Uri url, CancellationToken ct)
     {
         var result = new PageAccessibilityResult { DiscoveryRunId = runId, Url = url.AbsoluteUri };
@@ -114,6 +128,8 @@ public sealed class AccessibilityScanner(
         return result;
     }
 
+    // Run WCAG rules configured for this app plus axe-core best practices. Incomplete results
+    // are retained separately from violations because they need manual review, not a confirmed-failure score.
     private Task<AxeResult> RunChecksAsync(IPage page) => page.RunAxe(new AxeRunOptions
     {
         // WCAG A/AA and accessibility best practices
@@ -140,8 +156,13 @@ public sealed class AccessibilityScanner(
     private void Map(AxeResult axe, PageAccessibilityResult result)
     {
         var allViolations = axe.Violations ?? [];
+        // The configured WCAG tags identify accessibility findings; other selected rules are
+        // reported as best practices so they can be shown separately from the accessibility score.
         var violations = allViolations.Where(v => v.Tags.Any(t => t.StartsWith("wcag", StringComparison.Ordinal))).ToArray();
         var bestPractices = allViolations.Where(v => !v.Tags.Any(t => t.StartsWith("wcag", StringComparison.Ordinal))).ToArray();
+
+        // Counts and scores are per failed rule, not per affected element. Impact counts are
+        // also rule counts; impact severity affects the display order below, not the score.
         result.ViolationCount = violations.Select(v => v.Id).Distinct().Count();
         result.PassCount = axe.Passes?.Length ?? 0;
         result.IncompleteCount = axe.Incomplete?.Length ?? 0;
@@ -151,6 +172,9 @@ public sealed class AccessibilityScanner(
         result.MinorCount = violations.Count(v => Is(v.Impact, "minor"));
         result.Score = AccessibilityScoring.Calculate(violations.Select(v => v.Id));
         result.BestPracticesScore = AccessibilityScoring.Calculate(bestPractices.Select(v => v.Id));
+
+        // Keep every issue in the quality summary, but persist only a capped set of representative
+        // WCAG violations; the highest-impact rules with the most affected nodes are stored first.
         result.QualityIssues.AddRange(allViolations.Select(v => new QualityIssue(
             v.Tags.Any(t => t.StartsWith("wcag", StringComparison.Ordinal)) ? "Accessibility" : "Best Practices",
             v.Id, v.Help, v.Nodes?.FirstOrDefault()?.Target?.ToString())));
@@ -210,6 +234,7 @@ public sealed class AccessibilityScanner(
     private static string? Truncate(string? value, int max) =>
         value is null || value.Length <= max ? value : value[..max];
 
+    /// <summary>Releases the shared Chromium browser, Playwright instance, and synchronization resource.</summary>
     public async ValueTask DisposeAsync()
     {
         if (_browser is not null) await _browser.DisposeAsync();

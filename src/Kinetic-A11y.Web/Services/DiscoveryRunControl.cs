@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Kinetic;
 
+/// <summary>Coordinates discovery-run execution, cancellation, deletion, and restart.</summary>
 public sealed class DiscoveryRunControl(
     IDbContextFactory<DiscoveryDbContext> dbFactory,
     DiscoveryQueue queue,
@@ -10,6 +11,8 @@ public sealed class DiscoveryRunControl(
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<Guid, (CancellationTokenSource Cancellation, TaskCompletionSource Finished)> _active = [];
 
+    /// <summary>Cancels a queued or active run and waits for active work to finish.</summary>
+    /// <param name="runId">The identifier of the run to cancel.</param>
     public async Task CancelAsync(Guid runId)
     {
         Task finished = Task.CompletedTask;
@@ -36,6 +39,8 @@ public sealed class DiscoveryRunControl(
         await finished;
     }
 
+    /// <summary>Stops a run if necessary, then deletes it and its related results.</summary>
+    /// <param name="runId">The identifier of the run to delete.</param>
     public async Task DeleteAsync(Guid runId)
     {
         // Wait for the worker to stop writing before deleting its run and results.
@@ -52,6 +57,9 @@ public sealed class DiscoveryRunControl(
         finally { _gate.Release(); }
     }
 
+    /// <summary>Replaces a stopped run with a fresh run using its saved crawl settings.</summary>
+    /// <param name="runId">The identifier of the run to replace.</param>
+    /// <returns>The identifier of the newly queued run.</returns>
     public async Task<Guid> RestartAsync(Guid runId)
     {
         await _gate.WaitAsync();
@@ -82,6 +90,10 @@ public sealed class DiscoveryRunControl(
         finally { _gate.Release(); }
     }
 
+    /// <summary>Marks a queued run as active, invokes its crawl operation, and persists its final state.</summary>
+    /// <param name="runId">The identifier of the run to execute.</param>
+    /// <param name="crawl">The asynchronous crawl operation, supplied with the run's cancellation token.</param>
+    /// <param name="stoppingToken">The host-shutdown token linked to the run's cancellation.</param>
     public async Task ExecuteAsync(Guid runId, Func<CancellationToken, Task> crawl, CancellationToken stoppingToken)
     {
         using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);

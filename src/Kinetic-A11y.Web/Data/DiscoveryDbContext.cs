@@ -2,12 +2,24 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Kinetic;
 
+/// <summary>
+/// Provides Entity Framework access to discovery runs and their persisted results.
+/// </summary>
 public sealed class DiscoveryDbContext(DbContextOptions<DiscoveryDbContext> options) : DbContext(options)
 {
+    /// <summary>Gets the website discovery runs stored in the database.</summary>
     public DbSet<DiscoveryRun> DiscoveryRuns => Set<DiscoveryRun>();
+
+    /// <summary>Gets the PDF documents found by discovery runs.</summary>
     public DbSet<DiscoveredPdf> DiscoveredPdfs => Set<DiscoveredPdf>();
+
+    /// <summary>Gets the accessibility scan results for crawled pages.</summary>
     public DbSet<PageAccessibilityResult> PageAccessibilityResults => Set<PageAccessibilityResult>();
+
+    /// <summary>Gets the individual accessibility violations reported for pages.</summary>
     public DbSet<AccessibilityViolation> AccessibilityViolations => Set<AccessibilityViolation>();
+
+    /// <summary>Gets the SEO, accessibility, and link-quality results for pages.</summary>
     public DbSet<PageQualityResult> PageQualityResults => Set<PageQualityResult>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -56,6 +68,9 @@ public sealed class DiscoveryDbContext(DbContextOptions<DiscoveryDbContext> opti
         });
     }
 
+    /// <summary>
+    /// Adds JavaScript-rendering columns to an existing SQLite discovery-runs table when absent.
+    /// </summary>
     public async Task EnsureJavaScriptSchemaAsync()
     {
         await Database.OpenConnectionAsync();
@@ -76,6 +91,7 @@ public sealed class DiscoveryDbContext(DbContextOptions<DiscoveryDbContext> opti
         finally { await Database.CloseConnectionAsync(); }
     }
 
+    /// <summary>Creates the additive page-quality results table and its unique run/URL index if needed.</summary>
     public Task EnsureQualitySchemaAsync() => Database.ExecuteSqlRawAsync("""
         CREATE TABLE IF NOT EXISTS "PageQualityResults" (
             "Id" TEXT NOT NULL CONSTRAINT "PK_PageQualityResults" PRIMARY KEY,
