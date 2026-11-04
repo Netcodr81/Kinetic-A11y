@@ -56,9 +56,9 @@ else
     <table>
         <thead><tr><th>File</th><th>Status</th><th>Size</th><th>Source page</th><th>PDF URL</th></tr></thead>
         <tbody>
-        @foreach (var pdf in documents)
+        @foreach (var pdf in documents.Skip((pdfPage - 1) * pdfPageSize).Take(pdfPageSize))
         {
-            <tr>
+            <tr @key="pdf.Id">
                 <td>@pdf.FileName</td><td>@pdf.Status</td>
                 <td>@(pdf.FileSizeBytes.HasValue ? $"{pdf.FileSizeBytes.Value:N0} bytes" : "—")</td>
                 <td><a href="@pdf.SourcePageUrl" target="_blank" rel="noopener noreferrer">Source</a></td>
@@ -67,6 +67,8 @@ else
         }
         </tbody>
     </table>
+    <TablePagination TableName="Discovered PDFs" TotalCount="documents.Count"
+                     @bind-Page="pdfPage" @bind-PageSize="pdfPageSize" @bind-PageSize:after="() => pdfPage = 1" />
 
     <div class="toolbar">
         <h2>Site and page quality scores</h2>
@@ -89,9 +91,9 @@ else
         <table>
             <thead><tr><th>Page</th><th>Overall</th><th>Accessibility</th><th>Broken links</th><th>SEO</th><th>Best Practices</th><th>Issues</th></tr></thead>
             <tbody>
-            @foreach (var quality in qualityResults)
+            @foreach (var quality in qualityResults.Skip((qualityPage - 1) * qualityPageSize).Take(qualityPageSize))
             {
-                <tr>
+                <tr @key="quality.Id">
                     <td><a href="@quality.Url" target="_blank" rel="noopener noreferrer">@quality.Url</a></td>
                     <td>@FormatScore(quality.OverallScore)</td>
                     <td>@FormatScore(quality.AccessibilityScore)</td>
@@ -116,6 +118,8 @@ else
             }
             </tbody>
         </table>
+        <TablePagination TableName="Site and page quality scores" TotalCount="qualityResults.Count"
+                         @bind-Page="qualityPage" @bind-PageSize="qualityPageSize" @bind-PageSize:after="() => qualityPage = 1" />
     }
 
     @if (run.ScanAccessibility)
@@ -138,9 +142,9 @@ else
             <table>
                 <thead><tr><th>Score</th><th>Page</th><th>Critical</th><th>Serious</th><th>Moderate</th><th>Minor</th><th>Violations</th></tr></thead>
                 <tbody>
-                @foreach (var pageResult in accessibilityResults)
+                @foreach (var pageResult in accessibilityResults.Skip((accessibilityPage - 1) * accessibilityPageSize).Take(accessibilityPageSize))
                 {
-                    <tr>
+                    <tr @key="pageResult.Id">
                         <td><span class="score score-@AccessibilityScoring.Band(pageResult.Score)">@(pageResult.Score?.ToString() ?? "—")</span>
                             @if (!qualityUrls.Contains(pageResult.Url)) { <span class="muted">Legacy</span> }
                         </td>
@@ -175,6 +179,8 @@ else
                 }
                 </tbody>
             </table>
+            <TablePagination TableName="Page accessibility" TotalCount="accessibilityResults.Count"
+                             @bind-Page="accessibilityPage" @bind-PageSize="accessibilityPageSize" @bind-PageSize:after="() => accessibilityPage = 1" />
         }
     }
 }
@@ -187,6 +193,12 @@ else
     private SiteQualitySummary qualitySummary = new([]);
     private Dictionary<Guid, List<QualityIssue>> qualityIssues = [];
     private HashSet<string> qualityUrls = [];
+    private int pdfPage = 1;
+    private int pdfPageSize = 25;
+    private int qualityPage = 1;
+    private int qualityPageSize = 25;
+    private int accessibilityPage = 1;
+    private int accessibilityPageSize = 25;
     private static string FormatScore(double? score) => score?.ToString("0.#") ?? "N/A";
     private PeriodicTimer? timer;
     private CancellationTokenSource? cts;
@@ -264,24 +276,27 @@ else
         var quality = await db.PageQualityResults.AsNoTracking().Where(x => x.DiscoveryRunId == RunId).ToListAsync();
         qualitySummary = new(quality);
         qualityUrls = quality.Select(x => x.Url).ToHashSet(StringComparer.Ordinal);
-        qualityResults = quality.OrderBy(x => x.OverallScore ?? double.MaxValue).ThenBy(x => x.Url).Take(1000).ToList();
+        qualityResults = quality.OrderBy(x => x.OverallScore ?? double.MaxValue).ThenBy(x => x.Url).ThenBy(x => x.Id).ToList();
         qualityIssues = qualityResults.ToDictionary(x => x.Id,
             x => System.Text.Json.JsonSerializer.Deserialize<List<QualityIssue>>(x.IssuesJson)
                 ?? throw new InvalidOperationException("Invalid stored quality issues."));
         var storedDocuments = await db.DiscoveredPdfs.AsNoTracking()
             .Where(x => x.DiscoveryRunId == RunId).ToListAsync();
-        // Keep filtering in SQLite, but sort DateTimeOffset values in memory before limiting.
-        documents = storedDocuments.OrderByDescending(x => x.FirstDiscoveredAt).Take(1000).ToList();
+        // SQLite cannot sort DateTimeOffset values, so order the filtered results in memory.
+        documents = storedDocuments.OrderByDescending(x => x.FirstDiscoveredAt).ThenBy(x => x.Id).ToList();
         if (run?.ScanAccessibility == true)
         {
             var storedResults = await db.PageAccessibilityResults.AsNoTracking().Include(x => x.Violations)
                 .Where(x => x.DiscoveryRunId == RunId).ToListAsync();
             accessibilityResults = storedResults
-                .OrderBy(x => x.Score ?? int.MaxValue).ThenBy(x => x.Url).Take(1000).ToList();
+                .OrderBy(x => x.Score ?? int.MaxValue).ThenBy(x => x.Url).ThenBy(x => x.Id).ToList();
             foreach (var result in accessibilityResults)
                 result.Violations = result.Violations
                     .OrderByDescending(v => AccessibilityScoring.ImpactWeight(v.Impact)).ThenByDescending(v => v.NodeCount).ToList();
         }
+        pdfPage = Math.Clamp(pdfPage, 1, Math.Max(1, (int)Math.Ceiling(documents.Count / (double)pdfPageSize)));
+        qualityPage = Math.Clamp(qualityPage, 1, Math.Max(1, (int)Math.Ceiling(qualityResults.Count / (double)qualityPageSize)));
+        accessibilityPage = Math.Clamp(accessibilityPage, 1, Math.Max(1, (int)Math.Ceiling(accessibilityResults.Count / (double)accessibilityPageSize)));
     }
     public ValueTask DisposeAsync()
     {
