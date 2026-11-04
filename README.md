@@ -9,7 +9,7 @@ Kinetic-A11y is a .NET 10 Blazor Server app that discovers publicly linked PDF d
 - Find PDF links in HTML links, frames, embeds, objects, sources, and common URL data attributes, as well as sitemaps.
 - Check discovered PDF URLs with HTTP requests and report them as valid, unverified, or unavailable. The app does not intentionally download entire PDFs.
 - Persist crawl runs and results in SQLite; view progress and results in the web UI and export PDFs or accessibility results as CSV.
-- Optionally scan crawled pages with axe-core in headless Chromium for WCAG 2.0/2.1/2.2 Level A and AA rules, with separate Best Practices results.
+- Optionally scan crawled pages with axe-core in headless Chromium using configurable WCAG version and conformance-level tags. The checked-in configuration selects WCAG 2.0/2.1/2.2 A/AA tags, additional AAA tags, and Section 508 checks, with separate Best Practices results.
 - Score SEO and broken links on crawled HTML pages, and show per-page category scores and an overall site score.
 
 Automated accessibility checks cover only a subset of accessibility issues. The 0–100 score is a prioritization heuristic, not a compliance determination.
@@ -61,7 +61,7 @@ Settings are in `src/Kinetic-A11y.Web/appsettings.json`:
 | `Crawler` | `AllowedHosts` | Additional hosts the HTML crawler may follow. |
 | `Crawler` | `CheckSitemaps` | Whether to inspect `robots.txt` and common sitemap URLs. |
 | `Accessibility` | `Enabled` | Global switch for accessibility scanning. |
-| `Accessibility` | `Tags` | axe-core rule tags to run. Defaults to WCAG 2.0/2.1/2.2 A and AA; Best Practices checks are also run separately. |
+| `Accessibility` | `Tags` | axe-core rule tags selecting scan versions and levels. The checked-in list includes WCAG 2.0/2.1/2.2 A/AA, `wcag2aaa`, `wcag21aaa`, and `section508`. See [Accessibility scan levels](#accessibility-scan-levels). Best Practices checks are always included. |
 | `Accessibility` | `PageTimeoutSeconds` | Browser navigation and page-operation timeout. |
 | `Accessibility` | `MaxViolationsStoredPerPage` | Maximum violation records saved per page (default 100). |
 | `Accessibility` | `CaptureIssuePreviews` | Whether to save screenshots with the affected element outlined. |
@@ -70,6 +70,38 @@ Settings are in `src/Kinetic-A11y.Web/appsettings.json`:
 | `Accessibility` | `AutoInstallBrowsers` / `Headless` | Automatically install Chromium when missing and run it without a visible window. |
 
 Issue previews are captured for the highest-impact stored WCAG violations when their target can be located in the scanned page. PNG files are stored outside the web root; only their generated relative paths are stored in SQLite. Previews are removed when a run is deleted or replaced. Screenshots can contain sensitive page content, so keep the app and preview directory within a trusted environment.
+
+## Accessibility scan levels
+
+`Accessibility:Tags` selects groups of axe-core rules, not a certification target. WCAG conformance levels are cumulative: Level AA includes Level A requirements, and Level AAA includes A and AA. Tags themselves select rule groups; selecting a newer version or higher level alone does not automatically include all earlier-version and lower-level groups.
+
+| Scan scope | Tags |
+|---|---|
+| WCAG 2.0 Level A | `wcag2a` |
+| WCAG 2.0 Level AA additions | `wcag2aa` |
+| WCAG 2.1 Level A additions | `wcag21a` |
+| WCAG 2.1 Level AA additions | `wcag21aa` |
+| WCAG 2.2 Level A additions | `wcag22a` |
+| WCAG 2.2 Level AA additions | `wcag22aa` |
+| Additional AAA groups selected in the checked-in configuration | `wcag2aaa`, `wcag21aaa` |
+| Section 508 rule group | `section508` |
+
+For a WCAG 2.2 A/AA scan, retain all six A/AA tags above. For WCAG 2.1 A/AA, use `wcag2a`, `wcag2aa`, `wcag21a`, and `wcag21aa`. For an A-only scan across the configured versions, use `wcag2a`, `wcag21a`, and `wcag22a`. To include AAA checks, retain the applicable A/AA groups and add AAA tags supported by the bundled axe-core version. A tag only runs the automated rules available for that group; some groups may have no applicable rules.
+
+The current settings repeat `wcag2aaa`; the scanner removes duplicate tags before execution, so it does not run or count those checks twice. The list does not include `wcag22aaa` and should not be described as a complete WCAG 2.2 AAA scan. Tag availability and automated coverage depend on the bundled axe-core version; adding a tag does not add new rules to the engine. Section 508 selection likewise does not establish Section 508 compliance.
+
+### Adjusting the scan scope
+
+1. Stop or finish active scans before changing the scope.
+2. Edit the `Accessibility` section's `Tags` array in `src/Kinetic-A11y.Web/appsettings.json`. Use the combinations above to choose the desired versions and levels; add or remove `section508` independently. Check for environment-specific configuration overrides if the effective settings differ.
+3. Restart the application. The scanner reads its options when it is created; editing the file does not switch the scope of the existing scanner.
+4. Start a new scan to collect results with the updated tags. Existing results are not recalculated. **Start again** also uses the current application configuration, but permanently replaces the previous run and its results.
+
+Tags are application-wide settings, not a per-run selector in the UI, and the selected tag list is not saved with each run. Record the configuration separately when comparing scans. `Accessibility:Enabled` must be `true` and accessibility scanning must be enabled for the run; tag selection does not override either switch.
+
+The scanner always adds `best-practice`, even if it is omitted from `Tags`. Findings with any `wcag` tag contribute to the Accessibility score; selected findings without a `wcag` tag are reported under Best Practices. Consequently, a Section 508 finding contributes to Accessibility only if it also carries a WCAG tag; otherwise it appears under Best Practices, which is excluded from the overall score.
+
+Changing the selected rules can change scores without any website changes, so compare scores only with the scan scope in mind. Automated checks cover only part of any conformance level and do not replace manual review. A score of 100 does not establish WCAG or Section 508 compliance, including at AAA.
 
 ## DubBot-style scoring
 

@@ -135,7 +135,7 @@ else
             <div class="stat"><strong>@run.AccessibilityScanFailures</strong><span>Scan failures</span></div>
             <div class="stat"><strong>@accessibilityResults.Sum(x => x.CriticalCount + x.SeriousCount)</strong><span>Critical + serious rule failures</span></div>
         </div>
-        <p class="muted">Automated axe-core checks (WCAG A/AA) detect only a subset of accessibility issues. Repeated elements failing the same rule count as one issue type. Impact affects display order, not scoring. The score is a heuristic, not a compliance determination.</p>
+        <p class="muted">Automated axe-core checks (WCAG A/AA/AAA) detect only a subset of accessibility issues. Repeated elements failing the same rule count as one issue type. Impact affects display order, not scoring. The score is a heuristic, not a compliance determination.</p>
         @if (accessibilityResults.Count == 0) { <p class="muted">No pages scanned yet.</p> }
         else
         {
