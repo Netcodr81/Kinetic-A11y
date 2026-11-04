@@ -11,6 +11,13 @@ public sealed class PageQualityScanner(ILogger<PageQualityScanner> logger)
     public async Task<PageQualityResult> ScanAsync(Guid runId, Uri url, IDocument document,
         HttpClient client, bool accessibilityEnabled, CancellationToken ct)
     {
+        var result = CreateResult(runId, url, document, accessibilityEnabled);
+        await ScanLinksAsync(result, url, document, client, ct);
+        return result;
+    }
+
+    public PageQualityResult CreateResult(Guid runId, Uri url, IDocument document, bool accessibilityEnabled)
+    {
         var result = new PageQualityResult
         {
             DiscoveryRunId = runId,
@@ -25,17 +32,33 @@ public sealed class PageQualityScanner(ILogger<PageQualityScanner> logger)
                 !string.IsNullOrWhiteSpace(x.GetAttribute("content"))))
             issues.Add(new("SEO", "missing-description", "Meta description is missing or empty."));
         result.SeoScore = AccessibilityScoring.Calculate(issues.Where(x => x.Category == "SEO").Select(x => x.RuleId));
+        result.IssuesJson = JsonSerializer.Serialize(issues);
+        return result;
+    }
 
-        var baseUri = url;
+    public Task ScanLinksAsync(PageQualityResult result, Uri url, IDocument document,
+        HttpClient client, CancellationToken ct) =>
+        ScanLinksAsync(result, GetLinkBase(url, document),
+            document.QuerySelectorAll("a[href], area[href]").Select(x => x.GetAttribute("href")!).ToArray(), client, ct);
+
+    public static Uri GetLinkBase(Uri url, IDocument document)
+    {
         var baseHref = document.QuerySelector("base[href]")?.GetAttribute("href");
-        if (Uri.TryCreate(url, baseHref, out var resolvedBase) && resolvedBase.Scheme is "http" or "https")
-            baseUri = resolvedBase;
+        return Uri.TryCreate(url, baseHref, out var resolvedBase) && resolvedBase.Scheme is "http" or "https"
+            ? resolvedBase : url;
+    }
+
+    public async Task ScanLinksAsync(PageQualityResult result, Uri baseUri, IReadOnlyList<string> links,
+        HttpClient client, CancellationToken ct)
+    {
+        var issues = JsonSerializer.Deserialize<List<QualityIssue>>(result.IssuesJson)
+            ?? throw new InvalidOperationException("Invalid quality issues.");
         var targets = new HashSet<string>(StringComparer.Ordinal);
         var errors = new List<string>();
-        foreach (var link in document.QuerySelectorAll("a[href], area[href]"))
+        foreach (var link in links)
         {
             ct.ThrowIfCancellationRequested();
-            var href = link.GetAttribute("href")!.Trim();
+            var href = link.Trim();
             if (href.Length == 0 || href.StartsWith('#')) continue;
             if (!Uri.TryCreate(baseUri, href, out var target))
             {
@@ -60,7 +83,6 @@ public sealed class PageQualityScanner(ILogger<PageQualityScanner> logger)
             ? AccessibilityScoring.Calculate(issues.Where(x => x.Category == "Broken Links").Select(x => x.RuleId))
             : null;
         result.IssuesJson = JsonSerializer.Serialize(issues.DistinctBy(x => (x.Category, x.RuleId)));
-        return result;
     }
 
     private async Task<(bool? Broken, string? Error)> CheckLinkAsync(Uri url, HttpClient client, CancellationToken ct)

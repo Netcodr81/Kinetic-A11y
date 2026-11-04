@@ -35,6 +35,14 @@ Use **Cancel scan** on the run page to stop a queued or running scan, retaining 
 
 Use **Delete scan**, then **Confirm delete**, to permanently remove a run and all its associated PDF records, page accessibility results, and violations without starting another run. Active work is stopped before deletion. **Keep scan** dismisses the confirmation without changing the run.
 
+## JavaScript-rendered scans
+
+Select **JavaScript-rendered scan (slower)** before starting a run for sites that populate content using JavaScript. Set **Wait after page load** from 0 to 60 seconds (default 2). Chromium waits for the initial HTML DOM to load, then allows the configured extra time for scripts and API-driven rendering. The rendered HTML supplies page/PDF discovery, SEO, and link checks; accessibility checks run in that same browser page after the wait. Accessibility remains independently optional, but JavaScript mode requires Chromium even when accessibility is off.
+
+Fast server-HTML mode remains the default and preserves the existing behavior. Rendering settings are saved per run and copied by **Start again**. Existing runs receive fast-mode defaults without losing data. Browser navigation is bounded by `Accessibility:PageTimeoutSeconds`; the extra wait is separate and cancellable. Rendering errors are displayed on the run and affected accessibility page, rather than silently falling back to unrendered HTML or reporting a successful score.
+
+This is a fixed rendering allowance, not a guarantee that all JavaScript has finished. Increase it for slower sites. The crawler does not click controls or exercise every interactive state; hash-only routes are still not crawled separately, and shadow-DOM-only links are not extracted. JavaScript mode executes site scripts and may make third-party requests, so existing trusted-user and outbound-network precautions still apply. TLS errors, blocked requests, and failed link checks are not fixed by adding a wait.
+
 ## Configuration
 
 Settings are in `src/Kinetic-A11y.Web/appsettings.json`:
@@ -58,6 +66,10 @@ Scoring follows [DubBot's published methodology](https://help.dubbot.com/en/arti
 
 Site category scores are unrounded arithmetic averages of successfully checked pages. The overall site score averages Accessibility, Broken Links, and SEO category scores, excluding Best Practices. Accessibility is omitted when scanning is disabled. A page's overall score averages the same enabled categories; it is unavailable if any enabled category failed. Site scores are unavailable until every enabled category has at least one successful result. Failed checks are excluded from category averages, not treated as perfect scores; coverage is shown and scores are provisional during a scan or with incomplete coverage. The site average uses all saved quality pages, not just the 1,000 displayed in the table.
 
+Page crawling/accessibility, link checking, and PDF validation use three independent, sequential workers per run. Slow link checks or PDF responses do not block the next page scan. Link-check jobs retain only URLs, not browser pages or full HTML documents. PDFs are saved as Pending as soon as they are discovered; validation updates their status separately. Sitemap discovery runs after the HTML-linked page queue is drained, then adds any new sitemap-only pages and PDFs within the crawl limits.
+
+SEO and accessibility results are saved immediately. Broken Links and overall scores remain N/A while those checks are pending. The run shows the page-discovery activity and URL; link checks and PDF validation may continue in parallel. Once page discovery finishes, the run reports that it is waiting for those workers and stays Running until all work finishes. Cancelling stops and awaits all workers, preserving saved results and leaving unfinished PDF validation Pending rather than claiming success. Deletion and restart still wait for all writes to stop.
+
 SEO currently checks for a nonempty title and meta description. Broken-link checks cover distinct HTTP(S) anchor/area destinations, including external links, resolve HTML base URLs, ignore fragments, and cache checks within a run. A failing HEAD request is confirmed with GET (without reading the body); confirmed 404/410 responses count as broken URLs. Timeouts, network errors, authorization failures, rate limits, and other non-success responses are inconclusive and make that page's broken-link score unavailable. Repeated links to the same URL count once. These requests add crawl time and outbound traffic.
 
 The formula matches DubBot's published scoring, not its proprietary detection engine or full product coverage. Spelling and Web Governance are not implemented or included in the overall score. Results and issue details can be exported from `/runs/{id}/quality/export`; the accessibility export identifies legacy versus new-format scores.
@@ -80,6 +92,6 @@ src/
 
 ## Scope and safety
 
-The crawler discovers links that are present in fetched HTML or sitemaps; it does not execute page JavaScript or search authenticated content, form submissions, POST-only endpoints, or unlinked files. Sitemap discovery is best-effort, and some servers may not support the requests used to verify PDF URLs.
+The crawler discovers links from server HTML (or rendered HTML in optional JavaScript mode) and sitemaps. It does not search authenticated content, submit forms, explore POST-only endpoints, or guarantee discovery of unlinked files. Sitemap discovery is best-effort, and some servers may not support the requests used to verify PDF URLs.
 
 Only run discovery against sites you are authorized to access. The app has no authentication or authorization and accepts user-supplied URLs. URL validation limits the scheme to HTTP(S), but is not a complete SSRF defense; redirects, DNS rebinding, and browser-loaded subresources can reach destinations beyond the initial URL. Do not expose the app publicly or use it against untrusted URL submissions. Apply network-level egress restrictions and appropriate access controls before any deployment beyond a trusted local environment, and observe site terms, robots directives, and rate limits.

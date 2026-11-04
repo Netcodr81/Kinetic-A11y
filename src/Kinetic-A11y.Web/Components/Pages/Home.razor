@@ -17,6 +17,13 @@
         <div><label for="pages">Max pages</label><input id="pages" type="number" @bind="maxPages" min="1" max="100000" /></div>
     </div>
     <label class="checkbox"><input type="checkbox" @bind="scanAccessibility" /> Scan accessibility and Best Practices (axe-core, WCAG A/AA)</label>
+    <label class="checkbox"><input id="renderJavaScript" type="checkbox" @bind="renderJavaScript" /> JavaScript-rendered scan (slower)</label>
+    @if (renderJavaScript)
+    {
+        <label for="jsWait">Wait after page load (seconds)</label>
+        <input id="jsWait" type="number" @bind="javaScriptWaitSeconds" min="0" max="60" />
+        <p class="muted">Chromium renders every page and waits before discovering links and checking accessibility, SEO, and broken links. Increase the wait for slow-loading content. This does not click buttons or guarantee that all background activity has finished.</p>
+    }
     <p class="muted">SEO and HTTP(S) link checks run on every crawled HTML page, including external links. Scoring follows DubBot's published formula; check coverage differs.</p>
     <button @onclick="StartAsync" disabled="@starting">@(starting ? "Starting..." : "Start discovery")</button>
     @if (!string.IsNullOrWhiteSpace(error)) { <p class="error">@error</p> }
@@ -58,6 +65,8 @@ else
     private int maxDepth = 5;
     private int maxPages = 2000;
     private bool scanAccessibility = true;
+    private bool renderJavaScript;
+    private int javaScriptWaitSeconds = 2;
     private bool starting;
     private string? error;
     private List<DiscoveryRun>? runs;
@@ -85,8 +94,15 @@ else
                 throw new InvalidOperationException("Enter a valid absolute HTTP or HTTPS URL.");
             if (maxPages is < 1 or > 100000 || maxDepth is < 0 or > 20)
                 throw new InvalidOperationException("Crawl limits are outside the permitted range.");
+            if (renderJavaScript && javaScriptWaitSeconds is < 0 or > 60)
+                throw new InvalidOperationException("JavaScript wait must be between 0 and 60 seconds.");
             await using var db = await DbFactory.CreateDbContextAsync();
-            var run = new DiscoveryRun { RootUrl = uri.AbsoluteUri, MaxDepth = maxDepth, MaxPages = maxPages, ScanAccessibility = scanAccessibility };
+            var run = new DiscoveryRun
+            {
+                RootUrl = uri.AbsoluteUri, MaxDepth = maxDepth, MaxPages = maxPages,
+                ScanAccessibility = scanAccessibility, RenderJavaScript = renderJavaScript,
+                JavaScriptWaitSeconds = renderJavaScript ? javaScriptWaitSeconds : 2
+            };
             db.DiscoveryRuns.Add(run);
             await db.SaveChangesAsync();
             await Queue.EnqueueAsync(run.Id);

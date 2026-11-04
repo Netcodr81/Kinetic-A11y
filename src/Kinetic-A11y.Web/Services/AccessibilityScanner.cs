@@ -19,6 +19,59 @@ public sealed class AccessibilityScanner(
 
     public bool IsEnabled => _options.Enabled;
 
+    public async Task<(string Html, Uri FinalUrl, PageAccessibilityResult? Accessibility)> RenderAsync(
+        Guid runId, Uri url, int waitSeconds, bool scanAccessibility, CancellationToken ct)
+    {
+        if (waitSeconds is < 0 or > 60)
+            throw new InvalidOperationException("JavaScript wait must be between 0 and 60 seconds.");
+        var browser = await GetBrowserAsync(ct);
+        ct.ThrowIfCancellationRequested();
+        await using var context = await browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            UserAgent = "StatePdfDiscoveryMvp/1.0 (+contact administrator) axe-core"
+        });
+        var page = await context.NewPageAsync();
+        page.SetDefaultTimeout(_options.PageTimeoutSeconds * 1000f);
+        await using var registration = ct.Register(() => _ = page.CloseAsync());
+        try
+        {
+            ct.ThrowIfCancellationRequested();
+            var response = await page.GotoAsync(url.AbsoluteUri, new()
+            {
+                WaitUntil = WaitUntilState.DOMContentLoaded,
+                Timeout = _options.PageTimeoutSeconds * 1000f
+            });
+            ct.ThrowIfCancellationRequested();
+            if (response is not null && !response.Ok)
+                throw new InvalidOperationException($"HTTP {response.Status} while rendering {url}.");
+            var contentType = response is null ? null : await response.HeaderValueAsync("content-type");
+            if (contentType is not null && !contentType.Contains("html", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Cannot render non-HTML content at {url}.");
+            await Task.Delay(TimeSpan.FromSeconds(waitSeconds), ct);
+            var html = await page.ContentAsync();
+            var finalUrl = new Uri(page.Url);
+            PageAccessibilityResult? result = null;
+            if (scanAccessibility && IsEnabled)
+            {
+                result = new PageAccessibilityResult { DiscoveryRunId = runId, Url = url.AbsoluteUri };
+                try { Map(await RunChecksAsync(page), result); }
+                catch (Exception ex)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    logger.LogWarning(ex, "Accessibility check failed after rendering {Url}", url);
+                    result.Error = Truncate(ex.Message.Split('\n')[0], 2000);
+                }
+            }
+            ct.ThrowIfCancellationRequested();
+            return (html, finalUrl, result);
+        }
+        catch (Exception)
+        {
+            ct.ThrowIfCancellationRequested();
+            throw;
+        }
+    }
+
     public async Task<PageAccessibilityResult> ScanAsync(Guid runId, Uri url, CancellationToken ct)
     {
         var result = new PageAccessibilityResult { DiscoveryRunId = runId, Url = url.AbsoluteUri };
@@ -47,28 +100,7 @@ public sealed class AccessibilityScanner(
                 return result;
             }
 
-            var axe = await page.RunAxe(new AxeRunOptions
-            {
-                // WCAG A/AA and accessibility best practices
-                RunOnly = RunOnlyOptions.Tags(_options.Tags.Append("best-practice").Distinct().ToArray()),
-
-                // Include accessibility violations and potential issues
-                ResultTypes = new HashSet<ResultType>
-                {
-                    ResultType.Violations,
-                    ResultType.Incomplete
-                },
-
-                // Element identification
-                Selectors = true,
-                Ancestry = true,
-                XPath = false,
-                AbsolutePaths = false,
-
-                // Scan behavior
-                Iframes = true,
-                RestoreScroll = true
-            });
+            var axe = await RunChecksAsync(page);
             ct.ThrowIfCancellationRequested();
             Map(axe, result);
         }
@@ -76,11 +108,34 @@ public sealed class AccessibilityScanner(
         catch (Exception ex)
         {
             ct.ThrowIfCancellationRequested();
-            logger.LogDebug(ex, "Accessibility scan failed for {Url}", url);
+            logger.LogWarning(ex, "Accessibility scan failed for {Url}", url);
             result.Error = Truncate(ex.Message.Split('\n')[0], 2000);
         }
         return result;
     }
+
+    private Task<AxeResult> RunChecksAsync(IPage page) => page.RunAxe(new AxeRunOptions
+    {
+        // WCAG A/AA and accessibility best practices
+        RunOnly = RunOnlyOptions.Tags(_options.Tags.Append("best-practice").Distinct().ToArray()),
+
+        // Include accessibility violations and potential issues
+        ResultTypes = new HashSet<ResultType>
+                {
+                    ResultType.Violations,
+                    ResultType.Incomplete
+                },
+
+        // Element identification
+        Selectors = true,
+        Ancestry = true,
+        XPath = false,
+        AbsolutePaths = false,
+
+        // Scan behavior
+        Iframes = true,
+        RestoreScroll = true
+    });
 
     private void Map(AxeResult axe, PageAccessibilityResult result)
     {

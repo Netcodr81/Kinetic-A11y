@@ -56,6 +56,26 @@ public sealed class DiscoveryDbContext(DbContextOptions<DiscoveryDbContext> opti
         });
     }
 
+    public async Task EnsureJavaScriptSchemaAsync()
+    {
+        await Database.OpenConnectionAsync();
+        try
+        {
+            using var command = Database.GetDbConnection().CreateCommand();
+            command.CommandText = "PRAGMA table_info('DiscoveryRuns')";
+            var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            await using (var reader = await command.ExecuteReaderAsync())
+                while (await reader.ReadAsync()) columns.Add(reader.GetString(1));
+            if (!columns.Contains(nameof(DiscoveryRun.RenderJavaScript)))
+                await Database.ExecuteSqlRawAsync("ALTER TABLE DiscoveryRuns ADD COLUMN RenderJavaScript INTEGER NOT NULL DEFAULT 0");
+            if (!columns.Contains(nameof(DiscoveryRun.JavaScriptWaitSeconds)))
+                await Database.ExecuteSqlRawAsync("ALTER TABLE DiscoveryRuns ADD COLUMN JavaScriptWaitSeconds INTEGER NOT NULL DEFAULT 2");
+            if (!columns.Contains(nameof(DiscoveryRun.CurrentActivity)))
+                await Database.ExecuteSqlRawAsync("ALTER TABLE DiscoveryRuns ADD COLUMN CurrentActivity TEXT NULL");
+        }
+        finally { await Database.CloseConnectionAsync(); }
+    }
+
     public Task EnsureQualitySchemaAsync() => Database.ExecuteSqlRawAsync("""
         CREATE TABLE IF NOT EXISTS "PageQualityResults" (
             "Id" TEXT NOT NULL CONSTRAINT "PK_PageQualityResults" PRIMARY KEY,

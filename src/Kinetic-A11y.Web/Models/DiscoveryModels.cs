@@ -19,7 +19,10 @@ public sealed class DiscoveryRun
     public int PdfsValidated { get; set; }
     public int FailedRequests { get; set; }
     public string? Error { get; set; }
+    public string? CurrentActivity { get; set; }
     public bool ScanAccessibility { get; set; } = true;
+    public bool RenderJavaScript { get; set; }
+    public int JavaScriptWaitSeconds { get; set; } = 2;
     public int PagesAccessibilityScanned { get; set; }
     public int AccessibilityScanFailures { get; set; }
     public double? AverageAccessibilityScore { get; set; }

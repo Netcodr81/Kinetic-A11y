@@ -47,6 +47,7 @@ using (var scope = app.Services.CreateScope())
         await db.Database.EnsureCreatedAsync();
     }
     await db.EnsureQualitySchemaAsync();
+    await db.EnsureJavaScriptSchemaAsync();
 }
 if (!app.Environment.IsDevelopment())
 {

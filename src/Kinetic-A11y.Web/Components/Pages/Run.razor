@@ -13,6 +13,7 @@ else
 {
     <h1>Discovery results</h1>
     <p class="muted">@run.RootUrl</p>
+    <p class="muted">Scan mode: @(run.RenderJavaScript ? $"JavaScript rendered, {run.JavaScriptWaitSeconds}s wait after load" : "Server HTML (fast)")</p>
     <div class="stats">
         <div class="stat"><strong>@run.PagesCrawled</strong><span>Pages crawled</span></div>
         <div class="stat"><strong>@run.PdfsDiscovered</strong><span>PDFs discovered</span></div>
@@ -20,6 +21,11 @@ else
         <div class="stat"><strong>@run.FailedRequests</strong><span>Failed requests</span></div>
     </div>
     <p>Status: <strong>@run.Status</strong> · Started: @run.StartedAt?.ToLocalTime().ToString("g")</p>
+    @if (run.Status == DiscoveryRunStatus.Running && !string.IsNullOrWhiteSpace(run.CurrentActivity))
+    {
+        <p role="status">Current activity: @run.CurrentActivity</p>
+        <p class="muted">Link checks and PDF validation run separately from page scans. Discovered PDFs appear as Pending until validation finishes.</p>
+    }
     @if (run.Status is DiscoveryRunStatus.Queued or DiscoveryRunStatus.Running)
     {
         <button @onclick="CancelAsync" disabled="@changingRun">@(changingRun && !deleting ? "Cancelling..." : "Cancel scan")</button>
@@ -68,7 +74,7 @@ else
     </div>
     @if (qualityResults.Count == 0)
     {
-        <p class="muted">No new-format quality results yet. Existing accessibility scores use the legacy weighted formula; start a fresh run for DubBot-style scores.</p>
+        <p class="muted">No page quality results yet. Check the current activity and any errors above. Accessibility and SEO appear before link checks finish; overall scores remain N/A until the required category results are available.</p>
     }
     else
     {

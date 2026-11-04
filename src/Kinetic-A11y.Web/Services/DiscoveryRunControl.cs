@@ -28,6 +28,7 @@ public sealed class DiscoveryRunControl(
             {
                 run.Status = DiscoveryRunStatus.Cancelled;
                 run.CompletedAt = DateTimeOffset.UtcNow;
+                run.CurrentActivity = null;
                 await db.SaveChangesAsync();
             }
         }
@@ -67,7 +68,9 @@ public sealed class DiscoveryRunControl(
                 RootUrl = previous.RootUrl,
                 MaxDepth = previous.MaxDepth,
                 MaxPages = previous.MaxPages,
-                ScanAccessibility = previous.ScanAccessibility
+                ScanAccessibility = previous.ScanAccessibility,
+                RenderJavaScript = previous.RenderJavaScript,
+                JavaScriptWaitSeconds = previous.JavaScriptWaitSeconds
             };
             db.DiscoveryRuns.Remove(previous);
             db.DiscoveryRuns.Add(replacement);
@@ -122,7 +125,8 @@ public sealed class DiscoveryRunControl(
                 var run = await db.DiscoveryRuns.SingleAsync(x => x.Id == runId);
                 run.Status = cancellation.IsCancellationRequested ? DiscoveryRunStatus.Cancelled : status;
                 run.CompletedAt = DateTimeOffset.UtcNow;
-                run.Error = error;
+                run.Error = error ?? run.Error;
+                run.CurrentActivity = null;
                 await db.SaveChangesAsync();
                 finished.SetResult();
             }

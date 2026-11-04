@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Xml.Linq;
+using System.Threading.Channels;
 using AngleSharp.Html.Parser;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -20,11 +21,15 @@ public sealed class WebsiteCrawler(
 
     public async Task CrawlAsync(Guid runId, CancellationToken ct)
     {
+        using var workersCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        ct = workersCancellation.Token;
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var run = await db.DiscoveryRuns.SingleAsync(x => x.Id == runId, ct);
         var root = ValidateRoot(run.RootUrl);
         var maxDepth = run.MaxDepth;
         var maxPages = run.MaxPages;
+        if (run.RenderJavaScript && run.JavaScriptWaitSeconds is < 0 or > 60)
+            throw new InvalidOperationException("JavaScript wait must be between 0 and 60 seconds.");
         var allowedHosts = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { root.Host };
         foreach (var host in _options.AllowedHosts.Where(x => !string.IsNullOrWhiteSpace(x)))
             allowedHosts.Add(host.Trim());
@@ -37,61 +42,104 @@ public sealed class WebsiteCrawler(
         var scanAccessibility = run.ScanAccessibility && accessibilityScanner.IsEnabled;
         queue.Enqueue((root, 0));
         visited.Add(Normalize(root));
+        var linkJobs = Channel.CreateUnbounded<(Guid Id, Uri BaseUrl, string[] Links)>(
+            new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+        var pdfJobs = Channel.CreateUnbounded<Guid>(
+            new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+        var linkWorker = RunWorkerAsync(() => CheckLinksAsync(linkJobs.Reader, client, ct), workersCancellation);
+        var pdfWorker = RunWorkerAsync(() => ValidatePdfsAsync(pdfJobs.Reader, client, ct), workersCancellation);
+        var crawlFinished = false;
 
         try
         {
-            if (_options.CheckSitemaps)
-                await DiscoverSitemapsAsync(run, root, client, queue, pdfs, allowedHosts, ct);
-
-            while (queue.Count > 0 && visited.Count <= maxPages && !ct.IsCancellationRequested)
+            var sitemapsProcessed = !_options.CheckSitemaps;
+            while ((queue.Count > 0 || !sitemapsProcessed) && !ct.IsCancellationRequested)
             {
+                if (queue.Count == 0 && !sitemapsProcessed)
+                {
+                    await SetActivityAsync(db, run, "Discovering sitemaps", ct);
+                    await DiscoverSitemapsAsync(db, run, root, client, queue, visited, pdfs, pdfJobs.Writer, allowedHosts, ct);
+                    sitemapsProcessed = true;
+                    await db.SaveChangesAsync(ct);
+                    continue;
+                }
                 var (url, depth) = queue.Dequeue();
                 if (depth > maxDepth) continue;
                 try
                 {
                     await Task.Delay(_options.DelayMilliseconds, ct);
-                    using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
-                    if (!response.IsSuccessStatusCode) { run.FailedRequests++; continue; }
-                    var media = response.Content.Headers.ContentType?.MediaType;
-                    if (media is not null && !media.Contains("html", StringComparison.OrdinalIgnoreCase)) continue;
-                    var html = await response.Content.ReadAsStringAsync(ct);
+                    await SetActivityAsync(db, run,
+                        $"{(run.RenderJavaScript ? scanAccessibility ? "Rendering and checking accessibility" : "Rendering page" : "Loading page")}: {url}", ct);
+                    string html;
+                    var documentUrl = url;
+                    PageAccessibilityResult? renderedAccessibility = null;
+                    if (run.RenderJavaScript)
+                    {
+                        var rendered = await accessibilityScanner.RenderAsync(run.Id, url, run.JavaScriptWaitSeconds,
+                            scanAccessibility && !scannedPages.Contains(Normalize(url)), ct);
+                        html = rendered.Html;
+                        documentUrl = rendered.FinalUrl;
+                        renderedAccessibility = rendered.Accessibility;
+                    }
+                    else
+                    {
+                        using var response = await client.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, ct);
+                        if (!response.IsSuccessStatusCode) { run.FailedRequests++; continue; }
+                        var media = response.Content.Headers.ContentType?.MediaType;
+                        if (media is not null && !media.Contains("html", StringComparison.OrdinalIgnoreCase)) continue;
+                        html = await response.Content.ReadAsStringAsync(ct);
+                    }
                     run.PagesCrawled++;
 
                     var parser = new HtmlParser();
                     var document = await parser.ParseDocumentAsync(html, ct);
-                    foreach (var candidate in ExtractResourceUrls(document))
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        if (!Uri.TryCreate(url, candidate, out var target)) continue;
-                        target = StripFragment(target);
-                        if (target.Scheme is not ("http" or "https")) continue;
-                        if (LooksLikePdf(target))
-                            await ValidateAndStoreAsync(run, target, url, client, pdfs, ct);
-                        else if (depth < maxDepth && allowedHosts.Contains(target.Host))
-                        {
-                            var normalized = Normalize(target);
-                            if (visited.Add(normalized) && visited.Count <= maxPages)
-                            {
-                                queue.Enqueue((target, depth + 1));
-                                run.PagesDiscovered++;
-                            }
-                        }
-                    }
                     if (scannedPages.Add(Normalize(url)))
                     {
-                        var quality = await qualityScanner.ScanAsync(run.Id, url, document, client,
-                            scanAccessibility, ct);
+                        var quality = qualityScanner.CreateResult(run.Id, documentUrl, document, scanAccessibility);
                         quality.Url = Normalize(url);
                         db.PageQualityResults.Add(quality);
+                        await db.SaveChangesAsync(ct);
                         if (scanAccessibility)
                         {
-                            var accessibility = await ScanAccessibilityAsync(db, run, url, ct);
+                            await SetActivityAsync(db, run, $"Checking accessibility: {url}", ct);
+                            var accessibility = renderedAccessibility is not null
+                                ? StoreAccessibility(db, run, url, renderedAccessibility)
+                                : await ScanAccessibilityAsync(db, run, url, ct);
                             quality.AccessibilityScore = accessibility.Score;
                             quality.BestPracticesScore = accessibility.BestPracticesScore;
                             var issues = System.Text.Json.JsonSerializer.Deserialize<List<QualityIssue>>(quality.IssuesJson)
                                 ?? throw new InvalidOperationException("Invalid quality issues.");
                             issues.AddRange(accessibility.QualityIssues);
                             quality.IssuesJson = System.Text.Json.JsonSerializer.Serialize(issues);
+                            await db.SaveChangesAsync(ct);
+                        }
+                        await linkJobs.Writer.WriteAsync((quality.Id, PageQualityScanner.GetLinkBase(documentUrl, document),
+                            document.QuerySelectorAll("a[href], area[href]").Select(x => x.GetAttribute("href")!)
+                                .Distinct(StringComparer.Ordinal).ToArray()), ct);
+                        db.Entry(quality).State = EntityState.Detached;
+                    }
+                    var baseUrl = documentUrl;
+                    if (run.RenderJavaScript &&
+                        Uri.TryCreate(documentUrl, document.QuerySelector("base[href]")?.GetAttribute("href"), out var htmlBase) &&
+                        htmlBase.Scheme is "http" or "https") baseUrl = htmlBase;
+                    foreach (var candidate in ExtractResourceUrls(document))
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        if (!Uri.TryCreate(baseUrl, candidate, out var target)) continue;
+                        target = StripFragment(target);
+                        if (target.Scheme is not ("http" or "https")) continue;
+                        if (LooksLikePdf(target))
+                        {
+                            await DiscoverPdfAsync(db, run, target, url, pdfs, pdfJobs.Writer, ct);
+                        }
+                        else if (depth < maxDepth && allowedHosts.Contains(target.Host))
+                        {
+                            var normalized = Normalize(target);
+                            if (visited.Count < maxPages && visited.Add(normalized))
+                            {
+                                queue.Enqueue((target, depth + 1));
+                                run.PagesDiscovered++;
+                            }
                         }
                     }
                     await db.SaveChangesAsync(ct);
@@ -100,21 +148,50 @@ public sealed class WebsiteCrawler(
                 catch (Exception ex)
                 {
                     run.FailedRequests++;
-                    logger.LogDebug(ex, "Failed crawling {Url}", url);
+                    logger.LogWarning(ex, "Failed crawling {Url}", url);
+                    if (run.RenderJavaScript)
+                    {
+                        run.Error = $"JavaScript scan failed for {url}: {ex.Message.Split('\n')[0]}";
+                        if (scanAccessibility && scannedPages.Add(Normalize(url)))
+                            StoreAccessibility(db, run, url, new PageAccessibilityResult
+                            {
+                                DiscoveryRunId = run.Id, Url = Normalize(url), Error = run.Error
+                            });
+                        await db.SaveChangesAsync(ct);
+                    }
                 }
             }
 
             ct.ThrowIfCancellationRequested();
+            crawlFinished = true;
+            await SetActivityAsync(db, run, "Page discovery finished; waiting for link checks and PDF validation", ct);
         }
         finally
         {
-            // Preserve partial progress even when the run's cancellation token is cancelled.
-            await db.SaveChangesAsync(CancellationToken.None);
+            linkJobs.Writer.TryComplete();
+            pdfJobs.Writer.TryComplete();
+            if (!crawlFinished) await workersCancellation.CancelAsync();
+            try
+            {
+                await Task.WhenAll(linkWorker, pdfWorker);
+            }
+            finally
+            {
+                // Workers have stopped before final writes, cancellation, deletion, or restart completes.
+                await db.SaveChangesAsync(CancellationToken.None);
+            }
         }
     }
 
-    private async Task DiscoverSitemapsAsync(DiscoveryRun run, Uri root, HttpClient client,
-        Queue<(Uri Url, int Depth)> queue, HashSet<string> pdfs, HashSet<string> allowed, CancellationToken ct)
+    private static async Task SetActivityAsync(DiscoveryDbContext db, DiscoveryRun run, string activity, CancellationToken ct)
+    {
+        run.CurrentActivity = activity;
+        await db.SaveChangesAsync(ct);
+    }
+
+    private async Task DiscoverSitemapsAsync(DiscoveryDbContext db, DiscoveryRun run, Uri root, HttpClient client,
+        Queue<(Uri Url, int Depth)> queue, HashSet<string> visited, HashSet<string> pdfs,
+        ChannelWriter<Guid> pdfJobs, HashSet<string> allowed, CancellationToken ct)
     {
         var candidates = new[] { new Uri(root, "/robots.txt"), new Uri(root, "/sitemap.xml"), new Uri(root, "/sitemap_index.xml") };
         var sitemapUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -123,6 +200,7 @@ public sealed class WebsiteCrawler(
             ct.ThrowIfCancellationRequested();
             try
             {
+                await SetActivityAsync(db, run, $"Reading discovery file: {candidate}", ct);
                 var text = await client.GetStringAsync(candidate, ct);
                 if (candidate.AbsolutePath.EndsWith("robots.txt", StringComparison.OrdinalIgnoreCase))
                 {
@@ -154,6 +232,7 @@ public sealed class WebsiteCrawler(
             if (!seen.Add(uri.AbsoluteUri)) continue;
             try
             {
+                await SetActivityAsync(db, run, $"Reading sitemap: {uri}", ct);
                 var xml = await client.GetStringAsync(uri, ct);
                 var doc = XDocument.Parse(xml);
                 foreach (var loc in doc.Descendants().Where(x => x.Name.LocalName == "loc").Select(x => x.Value.Trim()))
@@ -162,13 +241,17 @@ public sealed class WebsiteCrawler(
                     if (!Uri.TryCreate(loc, UriKind.Absolute, out var item)) continue;
                     if (LooksLikePdf(item))
                     {
-                        await ValidateAndStoreAsync(run, item, uri, client, pdfs, ct);
+                        await DiscoverPdfAsync(db, run, item, uri, pdfs, pdfJobs, ct);
                     }
                     else if (depth < 3 && item.Host == root.Host &&
                              item.AbsolutePath.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
                         pending.Enqueue((item, depth + 1));
-                    else if (allowed.Contains(item.Host) && item.Host == root.Host)
+                    else if (run.MaxDepth >= 1 && allowed.Contains(item.Host) && item.Host == root.Host &&
+                             visited.Count < run.MaxPages && visited.Add(Normalize(item)))
+                    {
                         queue.Enqueue((item, 1));
+                        run.PagesDiscovered++;
+                    }
                 }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
@@ -179,11 +262,65 @@ public sealed class WebsiteCrawler(
         }
     }
 
-    private async Task ValidateAndStoreAsync(DiscoveryRun? run, Uri pdf, Uri source,
-        HttpClient client, HashSet<string> seen, CancellationToken ct)
+    private static async Task RunWorkerAsync(Func<Task> work, CancellationTokenSource cancellation)
+    {
+        try { await work(); }
+        catch
+        {
+            await cancellation.CancelAsync();
+            throw;
+        }
+    }
+
+    private async Task CheckLinksAsync(ChannelReader<(Guid Id, Uri BaseUrl, string[] Links)> jobs,
+        HttpClient client, CancellationToken ct)
+    {
+        await foreach (var job in jobs.ReadAllAsync(ct))
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var quality = await db.PageQualityResults.SingleAsync(x => x.Id == job.Id, ct);
+            await qualityScanner.ScanLinksAsync(quality, job.BaseUrl, job.Links, client, ct);
+            await db.SaveChangesAsync(ct);
+        }
+    }
+
+    private async Task ValidatePdfsAsync(ChannelReader<Guid> jobs, HttpClient client, CancellationToken ct)
+    {
+        await foreach (var id in jobs.ReadAllAsync(ct))
+        {
+            await using var db = await dbFactory.CreateDbContextAsync(ct);
+            var pdf = await db.DiscoveredPdfs.SingleAsync(x => x.Id == id, ct);
+            await ValidatePdfAsync(pdf, client, ct);
+            await using var transaction = await db.Database.BeginTransactionAsync(ct);
+            await db.SaveChangesAsync(ct);
+            if (pdf.Status == DiscoveredPdfStatus.Valid)
+                await db.DiscoveryRuns.Where(x => x.Id == pdf.DiscoveryRunId)
+                    .ExecuteUpdateAsync(s => s.SetProperty(x => x.PdfsValidated, x => x.PdfsValidated + 1), ct);
+            await transaction.CommitAsync(ct);
+        }
+    }
+
+    private static async Task DiscoverPdfAsync(DiscoveryDbContext db, DiscoveryRun run, Uri pdf, Uri source,
+        HashSet<string> seen, ChannelWriter<Guid> jobs, CancellationToken ct)
     {
         var key = Normalize(pdf);
         if (!seen.Add(key)) return;
+        var record = new DiscoveredPdf
+        {
+            DiscoveryRunId = run.Id, Url = key, SourcePageUrl = source.AbsoluteUri,
+            FileName = Path.GetFileName(pdf.LocalPath), Status = DiscoveredPdfStatus.Pending,
+            DiscoveryMethod = "SitemapOrHtml"
+        };
+        db.DiscoveredPdfs.Add(record);
+        run.PdfsDiscovered++;
+        await db.SaveChangesAsync(ct);
+        db.Entry(record).State = EntityState.Detached;
+        await jobs.WriteAsync(record.Id, ct);
+    }
+
+    private async Task ValidatePdfAsync(DiscoveredPdf record, HttpClient client, CancellationToken ct)
+    {
+        var pdf = new Uri(record.Url);
         var status = DiscoveredPdfStatus.Unverified;
         string? contentType = null;
         long? size = null;
@@ -204,47 +341,39 @@ public sealed class WebsiteCrawler(
                 if (!response.IsSuccessStatusCode) { status = DiscoveredPdfStatus.Unavailable; message = $"HTTP {(int)response.StatusCode}"; }
                 else
                 {
-                    var bytes = await response.Content.ReadAsByteArrayAsync(ct);
-                    status = HasPdfSignature(bytes) || contentType == "application/pdf"
+                    await using var stream = await response.Content.ReadAsStreamAsync(ct);
+                    var bytes = new byte[1024];
+                    var read = await stream.ReadAtLeastAsync(bytes, 5, throwOnEndOfStream: false, cancellationToken: ct);
+                    status = read >= 5 && HasPdfSignature(bytes) || contentType == "application/pdf"
                         ? DiscoveredPdfStatus.Valid : DiscoveredPdfStatus.Unverified;
                 }
             }
             else status = DiscoveredPdfStatus.Valid;
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested) { throw; }
+        catch (Exception ex) when (ex is HttpRequestException or OperationCanceledException or IOException)
         {
+            logger.LogWarning(ex, "PDF validation failed for {Url}", pdf);
             message = ex.Message;
             status = DiscoveredPdfStatus.Unverified;
         }
 
-        await using var db = await dbFactory.CreateDbContextAsync(ct);
-        var runId = run!.Id;
-        var exists = await db.DiscoveredPdfs.AnyAsync(x => x.DiscoveryRunId == runId && x.Url == key, ct);
-        if (exists) return;
-        db.DiscoveredPdfs.Add(new DiscoveredPdf
-        {
-            DiscoveryRunId = runId,
-            Url = key,
-            SourcePageUrl = source.AbsoluteUri,
-            FileName = Path.GetFileName(pdf.LocalPath),
-            ContentType = contentType,
-            FileSizeBytes = size,
-            Status = status,
-            LastVerifiedAt = DateTimeOffset.UtcNow,
-            ValidationMessage = message,
-            DiscoveryMethod = "SitemapOrHtml"
-        });
-        await db.SaveChangesAsync(ct);
-        if (run is not null)
-        {
-            run.PdfsDiscovered++;
-            if (status == DiscoveredPdfStatus.Valid) run.PdfsValidated++;
-        }
+        record.ContentType = contentType;
+        record.FileSizeBytes = size;
+        record.Status = status;
+        record.LastVerifiedAt = DateTimeOffset.UtcNow;
+        record.ValidationMessage = message;
     }
 
     private async Task<PageAccessibilityResult> ScanAccessibilityAsync(DiscoveryDbContext db, DiscoveryRun run, Uri url, CancellationToken ct)
     {
         var result = await accessibilityScanner.ScanAsync(run.Id, url, ct);
+        return StoreAccessibility(db, run, url, result);
+    }
+
+    private static PageAccessibilityResult StoreAccessibility(DiscoveryDbContext db, DiscoveryRun run, Uri url,
+        PageAccessibilityResult result)
+    {
         result.Url = Normalize(url);
         db.PageAccessibilityResults.Add(result);
         if (result.Score is { } score)
