@@ -439,3 +439,6 @@ FodyWeavers.xsd
 /src/Kinetic-A11y.Web/pdf-discovery.db
 /src/Kinetic-A11y.Web/pdf-discovery.db-shm
 /src/Kinetic-A11y.Web/pdf-discovery.db-wal
+/src/Kinetic-A11y.Web2/pdf-discovery.db
+/src/Kinetic-A11y.Web2/pdf-discovery.db-shm
+/src/Kinetic-A11y.Web2/pdf-discovery.db-wal

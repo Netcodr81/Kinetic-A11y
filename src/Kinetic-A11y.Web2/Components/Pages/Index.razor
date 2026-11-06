@@ -56,8 +56,8 @@
     </div>
 
     <StylizedHeader HeaderLevel="HeaderLevel.H2" HeaderText="Recent Discovery Runs"/>
-   
-    <BbDataTable TData="DiscoveryRun" Data="runs" SelectionMode="DataTableSelectionMode.Multiple" ShowToolbar="false"
+    <div class="discovery-table">
+    <BbDataTable TData="DiscoveryRun" Data="runs" SelectionMode="DataTableSelectionMode.Multiple" ShowToolbar="false" 
                  InitialPageSize="25" PageSizes="[25, 50, 100]">
         <Columns>
             <BbDataTableColumn TData="DiscoveryRun" TValue="string" Property="@(t => t.RootUrl)" Header="Website" Sortable="true"/>
@@ -105,15 +105,15 @@
             </BbDataTableColumn>
             <BbDataTableColumn TData="DiscoveryRun" TValue="Guid" Property="@(t => t.Id)" Header="">
                 <CellTemplate Context="run">
-                    <a href="/runs/@run.Id">View</a>
+                    <a class="text-blue-600 underline underline-offset-2" href="/runs/@run.Id">View</a>
                 </CellTemplate>
             </BbDataTableColumn>
         </Columns>
         <EmptyTemplate>
-            <p class="bg-white p-8 text-center text-lg">No Data Available</p>
+            <p class="border-1 border-slate-700 bg-white p-8 text-center text-lg">No Data Available</p>
         </EmptyTemplate>
     </BbDataTable>
-   
+   </div>
     
 </div>
 
