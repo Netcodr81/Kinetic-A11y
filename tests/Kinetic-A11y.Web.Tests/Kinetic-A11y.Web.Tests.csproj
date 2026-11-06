@@ -13,7 +13,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Kinetic-A11y.Web2\Kinetic-A11y.Web2.csproj" />
+    <ProjectReference Include="..\..\src\Kinetic-A11y.Web\Kinetic-A11y.Web.csproj" />
   </ItemGroup>
 
 </Project>

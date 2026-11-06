@@ -1,0 +1,667 @@
+@page "/runs/{RunId:guid}"
+@rendermode InteractiveServer
+@using Kinetic_A11y.Web.Components.Common.StylizedHeader
+@using Kinetic
+@implements IAsyncDisposable
+@inject IDbContextFactory<DiscoveryDbContext> DbFactory
+@inject DiscoveryRunControl RunControl
+@inject NavigationManager Navigation
+
+<PageTitle>Discovery run</PageTitle>
+<div class="p-8">
+<div class="mb-4 flex items-center justify-between gap-4">
+    <div>
+        <StylizedHeader HeaderLevel="HeaderLevel.H1" HeaderText="Discovery Results" Class="mb-0"/>
+    </div>
+    <div>
+        <button class="cursor-pointer rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100" @onclick="GoBack">← All runs</button>
+    </div>
+</div>
+
+@if (run is null)
+{
+    <p class="text-sm text-slate-700">@(loaded ? "This discovery run no longer exists." : "Loading run...")</p>
+}
+else
+{
+    <p class="muted">@run.RootUrl</p>
+
+    <div class="mt-3 mb-3 grid w-full grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="flex flex-col border border-slate-600 bg-white p-4">
+            <p class="text-sm font-semibold text-slate-600">Pages crawled</p>
+            <p class="text-2xl font-bold">@run.PagesCrawled</p>
+        </div>
+        <div class="flex flex-col border border-slate-600 bg-white p-4">
+            <p class="text-sm font-semibold text-slate-600">PDFs discovered</p>
+            <p class="text-2xl font-bold">@run.PdfsDiscovered</p>
+        </div>
+        <div class="flex flex-col border border-slate-600 bg-white p-4">
+            <p class="text-sm font-semibold text-slate-600">Validated</p>
+            <p class="text-2xl font-bold">@run.PdfsValidated</p>
+        </div>
+        <div class="flex flex-col border border-slate-600 bg-white p-4">
+            <p class="text-sm font-semibold text-slate-600">Failed requests</p>
+            <p class="text-2xl font-bold">@run.FailedRequests</p>
+        </div>
+    </div>
+
+    <div class="border-ocio-blue-500 my-4 flex flex-col border-1 bg-blue-200 p-4">
+        <p>Status: <span class="font-semibold">@run.Status</span></p>
+        <p>Started: @run.StartedAt?.ToLocalTime().ToString("g")</p>
+    </div>
+
+    @if (run.Status == DiscoveryRunStatus.Running && !string.IsNullOrWhiteSpace(run.CurrentActivity))
+    {
+        <div class="mb-4 border-1 border-slate-700 bg-white p-4">
+            <p role="status">
+                <span class="font-bold">Current Activity:</span> @run.CurrentActivity
+            </p>
+            <p class="text-sm text-slate-700">Link checks and PDF validation run separately from page scans. Discovered PDFs appear as Pending until validation finishes.</p>
+        </div>
+    }
+
+    @if (run.Status is DiscoveryRunStatus.Queued or DiscoveryRunStatus.Running)
+    {
+        <button class="btn btn-outline" @onclick="CancelAsync" disabled="@changingRun">@(changingRun && !deleting ? "Cancelling..." : "Cancel scan")</button>
+    }
+    else
+    {
+        <button class="btn btn-outline my-3" @onclick="RestartAsync" disabled="@changingRun">@(changingRun && !deleting ? "Starting..." : "Start again")</button>
+        <p class="text-sm text-slate-700">Starting again permanently deletes this run and its results and creates a fresh run with the same settings.</p>
+    }
+
+    @if (confirmDelete)
+    {
+        <div class="mt-4 flex flex-col border-1 bg-white p-4">
+            <p class="my-3 text-sm font-semibold text-slate-700" id="delete-warning">Permanently delete this scan and all its PDF and accessibility results? Any active scan will be stopped. This cannot be undone.</p>
+            <div class="flex gap-3">
+                <button class="btn min-w-[175px] bg-red-600 text-white" @onclick="DeleteAsync" disabled="@changingRun" aria-describedby="delete-warning">@(deleting ? "Deleting..." : "Confirm delete")</button>
+                <button class="btn btn-secondary min-w-[175px]" @onclick="() => confirmDelete = false" disabled="@changingRun">Keep scan</button>
+            </div>
+        </div>
+    }
+    else
+    {
+        <button class="btn my-3 bg-red-600 text-white" @onclick="() => confirmDelete = true" disabled="@changingRun">Delete scan</button>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(actionError))
+    {
+        <p class="font-semibold text-red-700" role="alert">@actionError</p>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(run.Error))
+    {
+        <p class="font-semibold text-red-700">@run.Error</p>
+    }
+
+    <div class="toolbar mt-4">
+        <StylizedHeader HeaderLevel="HeaderLevel.H2" HeaderText="Discovered PDFs"/>
+        <a class="btn bg-green-600 text-sm text-white" href="/runs/@RunId/export">Export CSV</a>
+    </div>
+    <div class="result-table">
+        <BbDataTable TData="DiscoveredPdf" Data="documents" InitialPageSize="25" PageSizes="[25, 50, 100]" ShowToolbar="false">
+            <Columns>
+                <BbDataTableColumn TData="DiscoveredPdf" TValue="string" Property="@(t => t.FileName)" Header="File" Sortable="true"/>
+
+
+                <BbDataTableColumn TData="DiscoveredPdf" TValue="DiscoveredPdfStatus" Property="@(t => t.Status)" Header="Status" Sortable="true"/>
+
+                <BbDataTableColumn TData="DiscoveredPdf" TValue="double?" Property="@(t => t.FileSizeBytes)" Header="Size" Sortable="true">
+                    <CellTemplate Context="pdf">
+                        @(pdf.FileSizeBytes.HasValue ? $"{pdf.FileSizeBytes.Value / (1024.0 * 1024):N2} MB" : "—")
+                    </CellTemplate>
+                </BbDataTableColumn>
+                <BbDataTableColumn TData="DiscoveredPdf" TValue="string" Property="@(t => t.SourcePageUrl)" Header="Source Page" Sortable="true">
+                    <CellTemplate Context="pdf">
+                        <a class="text-blue-600 underline underline-offset-2" href="@pdf.SourcePageUrl" target="_blank" rel="noopener noreferrer">@pdf.SourcePageUrl</a>
+                    </CellTemplate>
+                </BbDataTableColumn>
+                <BbDataTableColumn TData="DiscoveredPdf" TValue="string" Property="@(t => t.Url)" Header="PDF Url" Sortable="true">
+                    <CellTemplate Context="pdf">
+                        <a class="text-blue-600 underline underline-offset-2" href="@pdf.Url" target="_blank" rel="noopener noreferrer">Open PDF</a>
+                    </CellTemplate>
+                </BbDataTableColumn>
+            </Columns>
+            <EmptyTemplate>
+                <p class="text-sm text-slate-700">No page quality results yet. Check the current activity and any errors above. Accessibility and SEO appear before link checks finish; overall scores remain N/A until the required category results are available.</p>
+            </EmptyTemplate>
+        </BbDataTable>
+    </div>
+
+    <div class="toolbar">
+        <StylizedHeader HeaderLevel="HeaderLevel.H2" HeaderText="Site and Page Quality Scores"/>
+        <a class="btn bg-green-600 text-white" href="/runs/@RunId/quality/export">Export quality CSV</a>
+    </div>
+    @if (qualityResults.Count == 0)
+    {
+        <p class="text-sm text-slate-700">No page quality results yet. Check the current activity and any errors above. Accessibility and SEO appear before link checks finish; overall scores remain N/A until the required category results are available.</p>
+    }
+    else
+    {
+        <div class="my-4 grid w-full grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            <div class="flex flex-col border border-slate-600 bg-white p-4">
+                <p class="text-sm font-semibold text-slate-600">Overall site score</p>
+                <p class="text-2xl font-bold">@FormatScore(qualitySummary.Overall)</p>
+            </div>
+            <div class="flex flex-col border border-slate-600 bg-white p-4">
+                <p class="text-sm font-semibold text-slate-600">Accessibility</p>
+                <p class="text-2xl font-bold">@FormatScore(qualitySummary.Accessibility)</p>
+            </div>
+            <div class="flex flex-col border border-slate-600 bg-white p-4">
+                <p class="text-sm font-semibold text-slate-600">Broken links</p>
+                <p class="text-2xl font-bold">@FormatScore(qualitySummary.BrokenLinks)</p>
+            </div>
+            <div class="flex flex-col border border-slate-600 bg-white p-4">
+                <p class="text-sm font-semibold text-slate-600">SEO</p>
+                <p class="text-2xl font-bold">@FormatScore(qualitySummary.Seo)</p>
+            </div>
+            <div class="flex flex-col border border-slate-600 bg-white p-4">
+                <p class="text-sm font-semibold text-slate-600">Best Practices (excluded from overall)</p>
+                <p class="text-2xl font-bold">@FormatScore(qualitySummary.BestPractices)</p>
+            </div>
+        </div>
+
+        <p class="text-sm text-slate-700">DubBot-style scores: 100 minus 5 per distinct issue type, minimum 0. Category scores average successfully checked pages; overall averages enabled categories, excluding Best Practices. Fully scored pages: @qualitySummary.FullyScoredPages / @qualitySummary.Pages. Failed or disabled checks show N/A, not 100. Scores are provisional while scanning or when coverage is incomplete.</p>
+
+        <div class="result-table">
+            <BbDataTable TData="PageQualityResult" Data="qualityResults" InitialPageSize="25" PageSizes="[25, 50, 100]" ShowToolbar="false">
+                <Columns>
+                    <BbDataTableColumn TData="PageQualityResult" TValue="string" Property="@(t => t.Url)" Header="Page" Sortable="true">
+                        <CellTemplate Context="quality">
+                            <a class="text-blue-600 underline underline-offset-2" href="@quality.Url" target="_blank" rel="noopener noreferrer">@quality.Url</a>
+                        </CellTemplate>
+                    </BbDataTableColumn>
+                    <BbDataTableColumn TData="PageQualityResult" TValue="double?" Property="@(t => t.OverallScore)" Header="Overall" Sortable="true">
+                        <CellTemplate Context="quality">
+                            @FormatScore(quality.OverallScore)
+                        </CellTemplate>
+                    </BbDataTableColumn>
+                    <BbDataTableColumn TData="PageQualityResult" TValue="double?" Property="@(t => t.AccessibilityScore)" Header="Accessibility" Sortable="true">
+                        <CellTemplate Context="quality">
+                            @FormatScore(quality.AccessibilityScore)
+                        </CellTemplate>
+                    </BbDataTableColumn>
+                    <BbDataTableColumn TData="PageQualityResult" TValue="int?" Property="@(t => t.BrokenLinksScore)" Header="Broken Links" Sortable="true">
+                        <CellTemplate Context="quality">
+                            @FormatScore(quality.BrokenLinksScore)
+                        </CellTemplate>
+                    </BbDataTableColumn>
+                    <BbDataTableColumn TData="PageQualityResult" TValue="int?" Property="@(t => t.SeoScore)" Header="SEO" Sortable="true">
+                        <CellTemplate Context="quality">
+                            @FormatScore(quality.SeoScore)
+                        </CellTemplate>
+                    </BbDataTableColumn>
+                    <BbDataTableColumn TData="PageQualityResult" TValue="int?" Property="@(t => t.BestPracticesScore)" Header="Best Practices" Sortable="true">
+                        <CellTemplate Context="quality">
+                            @FormatScore(quality.BestPracticesScore)
+                        </CellTemplate>
+                    </BbDataTableColumn>
+                    <BbDataTableColumn TData="PageQualityResult" TValue="string" Property="@(t => t.LinkCheckError)" Header="Issues">
+                        <CellTemplate Context="quality">
+                            <div class="flex min-w-[16rem] flex-col gap-2 py-1">
+
+                                @* Link check error *@
+                                @if (quality.LinkCheckError is not null)
+                                {
+                                    <div class="flex items-start gap-2 rounded-lg border border-red-200
+                                            bg-red-50 px-3 py-2 text-sm text-red-800">
+
+                                        <span aria-hidden="true"
+                                              class="mt-0.5 flex size-5 shrink-0 items-center
+                                                justify-center rounded-full bg-red-100
+                                                font-bold text-red-700">
+                                            !
+                                        </span>
+
+                                        <div class="min-w-0">
+                                            <p class="font-semibold">Link check failed</p>
+
+                                            <p class="mt-0.5 leading-5 break-words">
+                                                @quality.LinkCheckError
+                                            </p>
+                                        </div>
+                                    </div>
+                                }
+
+                                @* Accessibility findings *@
+                                @{
+                                    var issues = qualityIssues[quality.Id];
+                                }
+
+                                @if (issues.Count > 0)
+                                {
+                                    <details>
+
+                                        <summary class="pb-2">
+                                            <span class="shrink-0 font-medium">
+                                                Accessibility findings
+                                            </span>
+
+                                            <span class="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700 ring-1 ring-blue-200 ring-inset">
+                                                @issues.Count
+                                            </span>
+                                        </summary>
+
+                                        @* Expanded findings *@
+                                        <div class="border-t border-slate-200 px-3 py-3">
+
+                                            <ul class="space-y-3">
+
+                                                @foreach (var issue in issues)
+                                                {
+                                                    <li class="rounded-md border border-slate-200
+                                                            bg-slate-50/70 p-3">
+
+                                                        @* Category and WCAG *@
+                                                        <div class="flex flex-wrap items-center gap-2">
+
+                                                            <span class="font-semibold text-slate-900">
+                                                                @issue.Category
+                                                            </span>
+
+                                                            @if (issue.WcagLevel is not null)
+                                                            {
+                                                                <span class="inline-flex items-center
+                                                                        rounded bg-blue-50 px-2 py-0.5
+                                                                        text-xs font-medium text-blue-800
+                                                                        ring-1 ring-blue-200 ring-inset">
+                                                                    WCAG @issue.WcagLevel
+                                                                </span>
+                                                            }
+
+                                                        </div>
+
+                                                        @* Description *@
+                                                        <p class="mt-2 leading-5 break-words text-slate-700">
+                                                            @issue.Message
+                                                        </p>
+
+                                                        @* Rule identifier *@
+                                                        @if (!string.IsNullOrWhiteSpace(issue.RuleId))
+                                                        {
+                                                            <div class="mt-2 flex flex-wrap items-center gap-1.5">
+
+                                                                <span class="text-xs font-medium text-slate-500">
+                                                                    Rule
+                                                                </span>
+
+                                                                <code class="rounded bg-white px-1.5 py-0.5
+                                                                        text-xs text-slate-700
+                                                                        ring-1 ring-slate-200 ring-inset">
+                                                                    @issue.RuleId
+                                                                </code>
+
+                                                            </div>
+                                                        }
+
+                                                        @* Affected element *@
+                                                        @if (!string.IsNullOrWhiteSpace(issue.Target))
+                                                        {
+                                                            <div class="mt-3">
+
+                                                                <p class="mb-1 text-xs font-medium
+                                                                        text-slate-500">
+                                                                    Affected element
+                                                                </p>
+
+                                                                <code class="block max-h-24 overflow-auto
+                                                                        rounded-md border border-slate-200
+                                                                        bg-white p-2 text-xs
+                                                                        break-all text-slate-700">
+                                                                    @issue.Target
+                                                                </code>
+
+                                                            </div>
+                                                        }
+
+                                                    </li>
+                                                }
+
+                                            </ul>
+
+                                        </div>
+
+                                    </details>
+                                }
+                                else if (quality.LinkCheckError is null)
+                                {
+                                    @* No findings *@
+                                    <div class="flex items-center gap-2 rounded-lg border
+                                            border-emerald-200 bg-emerald-50 px-3 py-2
+                                            text-sm text-emerald-800">
+
+                                        <span aria-hidden="true" class="font-semibold">✓</span>
+
+                                        <span class="font-medium">
+                                            No accessibility findings
+                                        </span>
+
+                                    </div>
+                                }
+
+                            </div>
+                        </CellTemplate>
+                    </BbDataTableColumn>
+                </Columns>
+                <EmptyTemplate>
+                    <p class="text-sm text-slate-700">No page quality results yet. Check the current activity and any errors above. Accessibility and SEO appear before link checks finish; overall scores remain N/A until the required category results are available.</p>
+                </EmptyTemplate>
+            </BbDataTable>
+        </div>
+    }
+
+    @if (run.ScanAccessibility)
+    {
+        var avg = run.AverageAccessibilityScore is { } a ? (int?)Math.Round(a) : null;
+        <div class="toolbar">
+            <StylizedHeader HeaderLevel="HeaderLevel.H2" HeaderText="Page Accessibility"/>
+            <a class="btn bg-green-600 text-white" href="/runs/@RunId/accessibility/export">Export accessibility CSV</a>
+        </div>
+        <div class="my-4 grid w-full grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div class="flex flex-col border border-slate-600 bg-white p-4">
+                <p class="text-sm font-semibold text-slate-600">@(qualityResults.Count == 0 ? "Legacy weighted accessibility score" : "Average accessibility score")</p>
+                <p class="text-2xl font-bold">
+                    <span class="score score-@AccessibilityScoring.Band(avg)">@(avg?.ToString() ?? "—")</span>
+                </p>
+            </div>
+            <div class="flex flex-col border border-slate-600 bg-white p-4">
+                <p class="text-sm font-semibold text-slate-600">Pages scanned</p>
+                <p class="text-2xl font-bold">@run.PagesAccessibilityScanned</p>
+            </div>
+            <div class="flex flex-col border border-slate-600 bg-white p-4">
+                <p class="text-sm font-semibold text-slate-600">Scan failures</p>
+                <p class="text-2xl font-bold">@run.AccessibilityScanFailures</p>
+            </div>
+            <div class="flex flex-col border border-slate-600 bg-white p-4">
+                <p class="text-sm font-semibold text-slate-600">Critical + serious rule failures</p>
+                <p class="text-2xl font-bold">@accessibilityResults.Sum(x => x.CriticalCount + x.SeriousCount)</p>
+            </div>
+        </div>
+        <p class="text-sm text-slate-700">Automated axe-core checks (WCAG A/AA/AAA) detect only a subset of accessibility issues. Repeated elements failing the same rule count as one issue type. Impact affects display order, not scoring. The score is a heuristic, not a compliance determination.</p>
+        @if (accessibilityResults.Count == 0)
+        {
+            <p class="text-sm text-slate-700">No pages scanned yet.</p>
+        }
+        else
+        {
+            <div class="result-table">
+                <BbDataTable TData="PageAccessibilityResult" Data="accessibilityResults" InitialPageSize="25" PageSizes="[25, 50, 100]" ShowToolbar="false">
+                    <Columns>
+                        <BbDataTableColumn TData="PageAccessibilityResult" TValue="int?" Property="@(t => t.Score)" Header="Score" Sortable="true">
+                            <CellTemplate Context="pageResult">
+                                <span class="score score-@AccessibilityScoring.Band(pageResult.Score)">@(pageResult.Score?.ToString() ?? "—")</span>
+                                @if (!qualityUrls.Contains(pageResult.Url))
+                                {
+                                    <span class="muted">Legacy</span>
+                                }
+
+                            </CellTemplate>
+                        </BbDataTableColumn>
+                        <BbDataTableColumn TData="PageAccessibilityResult" TValue="string" Property="@(t => t.Url)" Header="Page" Sortable="true">
+                            <CellTemplate Context="pageResult">
+                                <a class="text-blue-600 underline underline-offset-2" href="@pageResult.Url" target="_blank" rel="noopener noreferrer">@pageResult.Url</a>
+                            </CellTemplate>
+                        </BbDataTableColumn>
+                        <BbDataTableColumn TData="PageAccessibilityResult" TValue="int" Property="@(t => t.CriticalCount)" Header="Critical" Sortable="true">
+                            <CellTemplate Context="pageResult">
+                                @pageResult.CriticalCount
+                            </CellTemplate>
+                        </BbDataTableColumn>
+                        <BbDataTableColumn TData="PageAccessibilityResult" TValue="int" Property="@(t => t.SeriousCount)" Header="Serious" Sortable="true">
+                            <CellTemplate Context="pageResult">
+                                @pageResult.SeriousCount
+                            </CellTemplate>
+                        </BbDataTableColumn>
+                        <BbDataTableColumn TData="PageAccessibilityResult" TValue="int" Property="@(t => t.ModerateCount)" Header="Moderate" Sortable="true">
+                            <CellTemplate Context="pageResult">
+                                @pageResult.ModerateCount
+                            </CellTemplate>
+                        </BbDataTableColumn>
+                        <BbDataTableColumn TData="PageAccessibilityResult" TValue="int" Property="@(t => t.MinorCount)" Header="Minor" Sortable="true">
+                            <CellTemplate Context="pageResult">
+                                @pageResult.MinorCount
+                            </CellTemplate>
+                        </BbDataTableColumn>
+                        <BbDataTableColumn TData="PageAccessibilityResult" TValue="int" Property="@(t => t.ViolationCount)" Header="Violations" Sortable="true">
+                                <CellTemplate Context="pageResult">
+                                    @if (!string.IsNullOrWhiteSpace(pageResult.Error))
+                                    {
+                                        <span class="error">@pageResult.Error</span>
+                                    }
+                                    else if (pageResult.Violations.Count == 0)
+                                    {
+                                        <span class="muted">None</span>
+                                    }
+                                    else
+                                    {
+                                        <details>
+                                            <summary class="pb-2">
+                                                <span class="shrink-0 font-medium">
+                                                    Violations
+                                                </span>
+                                                <span class="shrink-0 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700 ring-1 ring-blue-200 ring-inset">
+                                                    @pageResult.Violations.Count
+                                                </span>
+                                            </summary>
+
+                                            <div class="border-t border-slate-200 px-3 py-3">
+                                                <ul class="space-y-3">
+                                                    @foreach (var v in pageResult.Violations)
+                                                    {
+                                                        <li class="rounded-md border border-slate-200 bg-slate-50/70 p-3">
+                                                            <div class="flex flex-wrap items-center gap-2">
+                                                                <span class="impact impact-@v.Impact">@v.Impact</span>
+
+                                                                @if (v.WcagLevel is not null)
+                                                                {
+                                                                    <span class="inline-flex items-center rounded bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-800 ring-1 ring-blue-200 ring-inset">
+                                                                        WCAG @v.WcagLevel
+                                                                    </span>
+                                                                }
+
+                                                                <a class="text-blue-600 underline underline-offset-2"
+                                                                   href="@v.HelpUrl"
+                                                                   target="_blank"
+                                                                   rel="noopener noreferrer">
+                                                                    @v.RuleId
+                                                                </a>
+                                                            </div>
+
+                                                            <p class="mt-2 leading-5 break-words text-slate-700">
+                                                                @v.Help (@v.NodeCount element@(v.NodeCount == 1 ? "" : "s"))
+                                                            </p>
+
+                                                            @if (!string.IsNullOrWhiteSpace(v.PreviewPath))
+                                                            {
+                                                                <div class="mt-2">
+                                                                    <a class="text-blue-600 underline underline-offset-2"
+                                                                       href="/runs/@RunId/accessibility/violations/@v.Id/preview"
+                                                                       target="_blank"
+                                                                       rel="noopener noreferrer">
+                                                                        View highlighted preview
+                                                                    </a>
+                                                                </div>
+                                                            }
+
+                                                            @if (!string.IsNullOrWhiteSpace(v.SampleTarget))
+                                                            {
+                                                                <div class="mt-3">
+                                                                    <p class="mb-1 text-xs font-medium text-slate-500">
+                                                                        Affected element
+                                                                    </p>
+                                                                    <code class="block max-h-24 overflow-auto rounded-md border border-slate-200 bg-white p-2 text-xs break-all text-slate-700">
+                                                                        @v.SampleTarget
+                                                                    </code>
+                                                                </div>
+                                                            }
+                                                        </li>
+                                                    }
+                                                </ul>
+                                            </div>
+                                        </details>
+                                    }
+                                </CellTemplate>
+                        </BbDataTableColumn>
+                    </Columns>
+                    <EmptyTemplate>
+                        <p class="text-sm text-slate-700">No page quality results yet. Check the current activity and any errors above. Accessibility and SEO appear before link checks finish; overall scores remain N/A until the required category results are available.</p>
+                    </EmptyTemplate>
+                </BbDataTable>
+            </div>
+        }
+    }
+}
+</div>
+
+@code {
+    [Parameter] public Guid RunId { get; set; }
+    private DiscoveryRun? run;
+    private List<DiscoveredPdf> documents = [];
+    private List<PageAccessibilityResult> accessibilityResults = [];
+    private List<PageQualityResult> qualityResults = [];
+    private SiteQualitySummary qualitySummary = new([]);
+    private Dictionary<Guid, List<QualityIssue>> qualityIssues = [];
+    private HashSet<string> qualityUrls = [];
+    private int pdfPage = 1;
+    private readonly int pdfPageSize = 25;
+    private int qualityPage = 1;
+    private readonly int qualityPageSize = 25;
+    private static string FormatScore(double? score) => score?.ToString("0.#") ?? "N/A";
+    private PeriodicTimer? timer;
+    private CancellationTokenSource? cts;
+    private bool changingRun;
+    private bool deleting;
+    private bool confirmDelete;
+    private bool loaded;
+    private string? actionError;
+
+    private async Task DeleteAsync()
+    {
+        changingRun = true;
+        deleting = true;
+        actionError = null;
+        try
+        {
+            await RunControl.DeleteAsync(RunId);
+            Navigation.NavigateTo("/", forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            actionError = ex.Message;
+        }
+        finally
+        {
+            changingRun = false;
+            deleting = false;
+        }
+    }
+
+    private async Task CancelAsync()
+    {
+        changingRun = true;
+        actionError = null;
+        try
+        {
+            await RunControl.CancelAsync(RunId);
+            await RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            actionError = ex.Message;
+        }
+        finally
+        {
+            changingRun = false;
+        }
+    }
+
+    private async Task RestartAsync()
+    {
+        changingRun = true;
+        actionError = null;
+        try
+        {
+            var replacementId = await RunControl.RestartAsync(RunId);
+            Navigation.NavigateTo($"/runs/{replacementId}", forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            actionError = ex.Message;
+        }
+        finally
+        {
+            changingRun = false;
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        cts = new CancellationTokenSource();
+        timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        await RefreshAsync();
+        _ = PollAsync(cts.Token);
+    }
+
+    private async Task PollAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (timer is not null && await timer.WaitForNextTickAsync(ct))
+            {
+                await RefreshAsync();
+                await InvokeAsync(StateHasChanged);
+                if (run is null || run.Status is DiscoveryRunStatus.Completed or DiscoveryRunStatus.Failed or DiscoveryRunStatus.Cancelled) break;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+    }
+
+    private async Task RefreshAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        run = await db.DiscoveryRuns.AsNoTracking().SingleOrDefaultAsync(x => x.Id == RunId);
+        loaded = true;
+        var quality = await db.PageQualityResults.AsNoTracking().Where(x => x.DiscoveryRunId == RunId).ToListAsync();
+        qualitySummary = new(quality);
+        qualityUrls = quality.Select(x => x.Url).ToHashSet(StringComparer.Ordinal);
+        qualityResults = quality.OrderBy(x => x.OverallScore ?? double.MaxValue).ThenBy(x => x.Url).ThenBy(x => x.Id).ToList();
+        qualityIssues = qualityResults.ToDictionary(x => x.Id,
+            x => System.Text.Json.JsonSerializer.Deserialize<List<QualityIssue>>(x.IssuesJson)
+                 ?? throw new InvalidOperationException("Invalid stored quality issues."));
+        var storedDocuments = await db.DiscoveredPdfs.AsNoTracking()
+            .Where(x => x.DiscoveryRunId == RunId).ToListAsync();
+        // SQLite cannot sort DateTimeOffset values, so order the filtered results in memory.
+        documents = storedDocuments.OrderByDescending(x => x.FirstDiscoveredAt).ThenBy(x => x.Id).ToList();
+        if (run?.ScanAccessibility == true)
+        {
+            var storedResults = await db.PageAccessibilityResults.AsNoTracking().Include(x => x.Violations)
+                .Where(x => x.DiscoveryRunId == RunId).ToListAsync();
+            accessibilityResults = storedResults
+                .OrderBy(x => x.Score ?? int.MaxValue).ThenBy(x => x.Url).ThenBy(x => x.Id).ToList();
+            foreach (var result in accessibilityResults)
+                result.Violations = result.Violations
+                    .OrderByDescending(v => AccessibilityScoring.ImpactWeight(v.Impact)).ThenByDescending(v => v.NodeCount).ToList();
+        }
+
+        pdfPage = Math.Clamp(pdfPage, 1, Math.Max(1, (int)Math.Ceiling(documents.Count / (double)pdfPageSize)));
+        qualityPage = Math.Clamp(qualityPage, 1, Math.Max(1, (int)Math.Ceiling(qualityResults.Count / (double)qualityPageSize)));
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        cts?.Cancel();
+        cts?.Dispose();
+        timer?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+
+    private void GoBack()
+    {
+        Navigation.NavigateTo("/");
+    }
+
+}

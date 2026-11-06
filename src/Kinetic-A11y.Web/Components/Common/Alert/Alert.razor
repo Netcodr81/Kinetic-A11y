@@ -1,0 +1,79 @@
+﻿
+@if (!string.IsNullOrWhiteSpace(Message))
+{
+    <div class="@ContainerClass @Class" role="@Role" aria-live="@AriaLive" aria-atomic="true">
+        <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+                <p class="font-semibold">@EffectiveTitle</p>
+                <p class="mt-1 text-sm whitespace-pre-wrap">@Message</p>
+            </div>
+
+            @if (Dismissible)
+            {
+                <button type="button"
+                        class="@ButtonClass"
+                        @onclick="Dismiss">
+                    Dismiss
+                </button>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter]
+    public string? Message { get; set; }
+
+    [Parameter]
+    public AlertType Type { get; set; } = AlertType.Info;
+
+    [Parameter]
+    public string? Heading { get; set; }
+
+    [Parameter]
+    public bool Dismissible { get; set; } = true;
+
+    [Parameter]
+    public EventCallback OnDismiss { get; set; }
+
+    [Parameter] 
+    public string Class { get; set; } = string.Empty;
+
+    private string ContainerClass => Type switch
+    {
+        AlertType.Success => "rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-900 shadow-sm",
+        AlertType.Warning => "rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-amber-900 shadow-sm",
+        AlertType.Error => "rounded-md border border-red-200 bg-red-50 px-4 py-3 text-red-900 shadow-sm",
+        _ => "rounded-md border border-sky-200 bg-sky-50 px-4 py-3 text-sky-900 shadow-sm"
+    };
+
+    private string ButtonClass => Type switch
+    {
+        AlertType.Success => "btn btn-outline-success shrink-0 border-current px-3 py-2 text-sm ",
+        AlertType.Warning => "btn btn-outline-warning shrink-0 border-current px-3 py-2 text-sm",
+        AlertType.Error => "btn btn-outline-error shrink-0 border-current px-3 py-2 text-sm ",
+        _ => "btn btn-outline-info shrink-0 border-current px-3 py-2 text-sm "
+    };
+
+    private string Role => Type == AlertType.Error ? "alert" : "status";
+
+    private string AriaLive => Type == AlertType.Error ? "assertive" : "polite";
+
+    private string EffectiveTitle => !string.IsNullOrWhiteSpace(Heading)
+        ? Heading
+        : Type switch
+        {
+            AlertType.Success => "Success",
+            AlertType.Warning => "Warning",
+            AlertType.Error => "Error",
+            _ => "Information"
+        };
+
+    private async Task Dismiss()
+    {
+        if (OnDismiss.HasDelegate)
+        {
+            await OnDismiss.InvokeAsync();
+        }
+    }
+}

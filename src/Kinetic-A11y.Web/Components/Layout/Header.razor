@@ -1,0 +1,88 @@
+﻿@using Microsoft.JSInterop
+@inject NavigationManager NavigationManager
+@inject IJSRuntime JSRuntime
+@implements IAsyncDisposable
+
+<header @ref="headerRoot" class="cio-header" aria-label="Site header">
+    <BbResponsiveNavProvider>
+        <div class="cio-header__top shell-container">
+            <a href="/" aria-label="Home" class="cio-header__logo-link">
+                <img src="/icons/cio_header_logo.svg" alt="CIO Header Logo" class="cio-header__logo-img"/>
+                <span class="cio-header__logo-text">Kinetic_A11y.Web2</span>
+            </a>
+
+            <BbResponsiveNavTrigger Class="cio-header__menu-toggle">
+                <span class="text-sm">Menu</span>
+            </BbResponsiveNavTrigger>
+        </div>
+
+        <nav class="cio-header__nav" aria-label="Primary">
+            <div class="shell-container">
+                <ul class="cio__nav-list">
+                    <li class="cio-nav__link">
+                        <a href="/"
+                           @onclick="NavigateToHome"
+                           @onclick:preventDefault="true">
+                            Home
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </nav>
+
+        <BbResponsiveNavContent Side="SheetSide.Right">
+            <nav aria-label="Mobile navigation" class="cio-header__mobile-nav">
+                <ul class="mobile-menu-list">
+                    <li>
+                        <a href="/"
+                           @onclick="NavigateToHome"
+                           @onclick:preventDefault="true">
+                            Home
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+        </BbResponsiveNavContent>
+    </BbResponsiveNavProvider>
+</header>
+
+@code {
+    private ElementReference headerRoot;
+    private IJSObjectReference? dropdownModule;
+
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender)
+        {
+            return;
+        }
+
+        dropdownModule = await JSRuntime.InvokeAsync<IJSObjectReference>("import", "./Components/Layout/Header.razor.js");
+        await dropdownModule.InvokeVoidAsync("initialize", headerRoot);
+    }
+
+    private void NavigateToHome()
+    {
+        NavigationManager.NavigateTo("/", forceLoad: true);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (dropdownModule is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await dropdownModule.InvokeVoidAsync("dispose");
+            await dropdownModule.DisposeAsync();
+        }
+        catch (JSDisconnectedException)
+        {
+            dropdownModule = null;
+        }
+    }
+
+}

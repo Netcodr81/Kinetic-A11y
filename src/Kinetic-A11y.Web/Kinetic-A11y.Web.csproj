@@ -1,0 +1,85 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+
+    <!-- Check if npm is installed before attempting to use it -->
+    <Target Name="CheckNpm" BeforeTargets="NpmInstall" Condition="Exists('$(MSBuildProjectDirectory)\package.json')">
+        <Exec Command="npm --version" ContinueOnError="true" IgnoreExitCode="true" IgnoreStandardErrorWarningFormat="true">
+            <Output TaskParameter="ExitCode" PropertyName="NpmExitCode"/>
+        </Exec>
+
+        <Error Condition="'$(NpmExitCode)' != '0'" Text="npm is not installed or not in PATH. Please install Node.js and npm before building this project. Download from: https://nodejs.org/"/>
+    </Target>
+
+    <Target Name="NpmInstall" BeforeTargets="TailwindBuild" Condition="Exists('$(MSBuildProjectDirectory)\package.json') AND !Exists('$(MSBuildProjectDirectory)\node_modules')">
+
+        <Exec Command="npm ci" WorkingDirectory="$(MSBuildProjectDirectory)" Condition="Exists('$(MSBuildProjectDirectory)\package-lock.json')"/>
+
+        <Exec Command="npm install" WorkingDirectory="$(MSBuildProjectDirectory)" Condition="!Exists('$(MSBuildProjectDirectory)\package-lock.json')"/>
+    </Target>
+
+    <Target Name="TailwindBuild" BeforeTargets="BeforeBuild;BeforePublish" DependsOnTargets="CheckNpm" Condition="Exists('$(MSBuildProjectDirectory)\package.json')">
+
+        <Exec Command="npm run tailwind-build" WorkingDirectory="$(MSBuildProjectDirectory)"/>
+    </Target>
+
+    <ItemGroup>
+        <Content Update="appsettings.Development.json">
+            <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+        </Content>
+    </ItemGroup>
+
+    <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+        <DebugType>None</DebugType>
+        <DebugSymbols>false</DebugSymbols>
+    </PropertyGroup>
+
+
+    <ItemGroup>
+        <PackageReference Include="Ardalis.Result"/>
+        <PackageReference Include="Ardalis.SmartEnum"/>
+        <PackageReference Include="Blazilla"/>
+        <PackageReference Include="Blazor.Sonner"/>
+        <PackageReference Include="BlazorBlueprint.Components"/>
+        <PackageReference Include="Microsoft.EntityFrameworkCore"/>
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer"/>
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Tools">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <PackageReference Include="Serilog.AspNetCore"/>
+        <PackageReference Include="Serilog.Settings.Configuration"/>
+        <PackageReference Include="Serilog.Sinks.Console"/>
+        <PackageReference Include="Serilog.Sinks.MSSqlServer"/>
+        <PackageReference Include="Serilog.Sinks.Seq"/>
+        <PackageReference Include="SonarAnalyzer.CSharp">
+            <PrivateAssets>all</PrivateAssets>
+            <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+        </PackageReference>
+        <PackageReference Include="ZiggyCreatures.FusionCache"/>
+        <PackageReference Include="ZiggyCreatures.FusionCache.Serialization.SystemTextJson"/>
+        <PackageReference Include="System.Security.Cryptography.Pkcs"/>
+        <PackageReference Include="AngleSharp" />
+        <PackageReference Include="Deque.AxeCore.Playwright" />
+        <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+        <PackageReference Include="Microsoft.Extensions.Http.Resilience" />
+        <PackageReference Include="Microsoft.Playwright" />
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Migration files are generated; suppress analyzer diagnostics there -->
+        <Compile Update="Migrations\**\*.cs">
+            <GeneratedCode>true</GeneratedCode>
+            <!-- Add compiler warning IDs here as needed -->
+            <NoWarn>$(NoWarn);CS8981</NoWarn>
+        </Compile>
+    </ItemGroup>
+
+    <ItemGroup>
+      <_ContentIncludedByDefault Remove="Components\Common\TablePagination\TablePagination.razor" />
+    </ItemGroup>
+
+</Project>

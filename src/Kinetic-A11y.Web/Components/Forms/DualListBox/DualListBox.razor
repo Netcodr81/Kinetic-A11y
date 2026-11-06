@@ -1,0 +1,177 @@
+﻿@using BlazorBlueprint.Icons.Lucide.Components
+@namespace Kinetic_A11y.Web.Components.Forms.DualListBox
+@typeparam TItem
+
+<div @attributes="AdditionalAttributes" class="dual-listbox">
+
+    <!-- Available -->
+    <section class="dual-listbox-panel" aria-labelledby="@AvailableHeadingId">
+        <h3 id="@AvailableHeadingId" class="dual-listbox-heading">
+            @AvailableLabel
+        </h3>
+
+        <label for="@AvailableSearchId" class="dual-listbox-sr-only">
+            Search @AvailableLabel
+        </label>
+
+        <input id="@AvailableSearchId"
+               type="search"
+               class="dual-listbox-search"
+               placeholder="@SearchPlaceholder"
+               @bind="availableSearch"
+               @bind:event="oninput"
+               aria-label="Search @AvailableLabel"
+               aria-controls="@AvailableListId" />
+
+        <div class="dual-listbox-select-all">
+            <input id="@AvailableSelectAllId"
+                   type="checkbox"
+                   class="dual-listbox-select-all-checkbox"
+                   checked="@IsAllAvailableSelected"
+                   disabled="@(!FilteredAvailableItems.Any())"
+                   @onchange="ToggleAllAvailableSelection" />
+            <label for="@AvailableSelectAllId" class="dual-listbox-select-all-label">Select all</label>
+        </div>
+
+        <div id="@AvailableListId"
+             class="dual-listbox-list"
+             role="listbox"
+             aria-labelledby="@AvailableHeadingId"
+             aria-multiselectable="true"
+             tabindex="-1"
+             @onkeydown="HandleAvailableKeyDown">
+
+            @if (FilteredAvailableItems.Count == 0)
+            {
+                <div class="dual-listbox-empty">
+                    @EmptyAvailableMessage
+                </div>
+            }
+            else
+            {
+                @foreach (var option in FilteredAvailableItems.Select((item, index) => new { item, index }))
+                {
+                    var isSelected = availableSelection.Contains(option.item);
+                    var isFocused = availableFocusIndex == option.index;
+
+                    <div id="@GetAvailableOptionId(option.index)"
+                         role="option"
+                         aria-label="@ItemText(option.item)"
+                         aria-selected="@isSelected"
+                         tabindex="@(isFocused ? 0 : -1)"
+                         class="@GetOptionClass(isSelected, isFocused) dual-listbox-option-spacing"
+                         @onclick="() => ClickAvailableItem(option.index)"
+                         @ondblclick="() => MoveAvailableItem(option.index)">
+                        @ItemText(option.item)
+                    </div>
+                }
+            }
+        </div>
+
+        <div class="dual-listbox-status"
+             aria-live="polite"
+             aria-atomic="true">
+            @GetSelectionStatus(
+                availableSelection.Count,
+                FilteredAvailableItems.Count)
+        </div>
+    </section>
+
+
+    <!-- Transfer buttons -->
+    <div class="dual-listbox-actions">
+
+        <button type="button"
+                class="dual-listbox-button dual-listbox-actions-button-add"
+                disabled="@(!availableSelection.Any())"
+                aria-label="@AddSelectedLabel"
+                @onclick="MoveSelectedToRight">
+            <span aria-hidden="true"><LucideIcon Name="move-right"/></span>
+            <span class="dual-listbox-sr-only">@AddSelectedLabel</span>
+        </button>
+
+        <button type="button"
+                class="dual-listbox-button dual-listbox-button-hover dual-listbox-actions-button-remove"
+                disabled="@(!selectedSelection.Any())"
+                aria-label="@RemoveSelectedLabel"
+                @onclick="MoveSelectedToLeft">
+            <span aria-hidden="true"><LucideIcon Name="move-left"/></span>
+            <span class="dual-listbox-sr-only">@RemoveSelectedLabel</span>
+        </button>
+
+    </div>
+
+    <!-- Selected -->
+    <section class="dual-listbox-panel" aria-labelledby="@SelectedHeadingId">
+        <h3 id="@SelectedHeadingId" class="dual-listbox-heading">
+            @SelectedLabel
+        </h3>
+
+        <label for="@SelectedSearchId" class="dual-listbox-sr-only">
+            Search @SelectedLabel
+        </label>
+
+        <input id="@SelectedSearchId"
+               type="search"
+               class="dual-listbox-search"
+               placeholder="@SearchPlaceholder"
+               @bind="selectedSearch"
+               @bind:event="oninput"
+               aria-label="Search @SelectedLabel"
+               aria-controls="@SelectedListId" />
+
+        <div class="dual-listbox-select-all">
+            <input id="@SelectedSelectAllId"
+                   type="checkbox"
+                   class="dual-listbox-select-all-checkbox"
+                   checked="@IsAllSelectedSelected"
+                   disabled="@(!FilteredSelectedItems.Any())"
+                   @onchange="ToggleAllSelectedSelection" />
+            <label for="@SelectedSelectAllId" class="dual-listbox-select-all-label">Select all</label>
+        </div>
+
+        <div id="@SelectedListId"
+             class="dual-listbox-list"
+             role="listbox"
+             aria-labelledby="@SelectedHeadingId"
+             aria-multiselectable="true"
+             tabindex="-1"
+             @onkeydown="HandleSelectedKeyDown">
+
+            @if (FilteredSelectedItems.Count == 0)
+            {
+                <div class="dual-listbox-empty">
+                    @EmptySelectedMessage
+                </div>
+            }
+            else
+            {
+                @foreach (var option in FilteredSelectedItems.Select((item, index) => new { item, index }))
+                {
+                    var isSelected = selectedSelection.Contains(option.item);
+                    var isFocused = selectedFocusIndex == option.index;
+
+                    <div id="@GetSelectedOptionId(option.index)"
+                         role="option"
+                         aria-selected="@isSelected"
+                         aria-label="@ItemText(option.item)"
+                         tabindex="@(isFocused ? 0 : -1)"
+                         class="@GetOptionClass(isSelected, isFocused) dual-listbox-option-spacing"
+                         @onclick="() => ClickSelectedItem(option.index)"
+                         @ondblclick="() => MoveSelectedItem(option.index)">
+                        @ItemText(option.item)
+                    </div>
+                }
+            }
+        </div>
+
+        <div class="dual-listbox-status"
+             aria-live="polite"
+             aria-atomic="true">
+            @GetSelectionStatus(
+                selectedSelection.Count,
+                FilteredSelectedItems.Count)
+        </div>
+    </section>
+
+</div>

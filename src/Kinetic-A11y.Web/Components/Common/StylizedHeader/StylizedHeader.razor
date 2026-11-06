@@ -1,0 +1,50 @@
+﻿@switch(HeaderLevel)
+{
+    case HeaderLevel.H1:
+        <h1 @attributes="AdditionalAttributes" class="stylized-header @Class" style="@HeaderVariables">@HeaderText</h1>
+        break;
+    case HeaderLevel.H2:
+        <h2 @attributes="AdditionalAttributes" class="stylized-header @Class" style="@HeaderVariables">@HeaderText</h2>
+        break;
+    case HeaderLevel.H3:
+        <h3 @attributes="AdditionalAttributes" class="stylized-header @Class" style="@HeaderVariables">@HeaderText</h3>
+        break;
+    case HeaderLevel.H4:
+        <h4 @attributes="AdditionalAttributes" class="stylized-header @Class" style="@HeaderVariables">@HeaderText</h4>
+        break;
+    case HeaderLevel.H5:
+        <h5 @attributes="AdditionalAttributes" class="stylized-header @Class" style="@HeaderVariables">@HeaderText</h5>
+        break;
+    default:
+        <h1 @attributes="AdditionalAttributes" class="stylized-header @Class" style="@HeaderVariables">@HeaderText</h1>
+        break;
+}
+
+@code {
+
+    [Parameter]
+    [EditorRequired]
+    public string HeaderText { get; set; } = string.Empty;
+
+    [Parameter]
+    public HeaderLevel HeaderLevel { get; set; }
+
+    [Parameter] 
+    public string FontSize { get; set; } = "1.99rem;";
+
+    [Parameter] 
+    public string BorderColor { get; set; } = "#ffc44d";
+
+    [Parameter] public string FontColor { get; set; } = "#000000";
+
+    [Parameter(CaptureUnmatchedValues = true)]
+    public Dictionary<string, object> AdditionalAttributes { get; set; } = new();
+
+    [Parameter]
+    public string? Class { get; set; }
+
+    private string HeaderVariables => $"--stylized-header-underline-color:{BorderColor};--stylized-header-font-size:{FontSize};--stylized-header-underline-color:{BorderColor}";
+
+
+
+}

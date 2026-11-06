@@ -1,0 +1,29 @@
+﻿@using Kinetic_A11y.Web.Components.Utilities
+@inherits LayoutComponentBase
+
+<PageTitle>Kinetic_A11y.Web2</PageTitle>
+
+<SkipToContent TargetId="main-content-target" />
+<div id="page-top" class="anchor__container" aria-hidden="true" data-anchor-id="page-top"></div>
+<div class="document d-flex flex-column justify-content-between">
+    <Banner/>
+    <Header />
+
+    <a id="main-content-target" class="visually-hidden-focusable">Main content</a>
+    <main id="main-content" role="main" class="flex-grow-1 p-3" tabindex="-1">
+        @Body
+    </main>
+    <Footer/>
+</div>
+
+<BbDialogProvider />
+
+<BbPortalHost />
+
+<LoadingOverlay/>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>
