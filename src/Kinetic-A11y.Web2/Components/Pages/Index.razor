@@ -1,4 +1,6 @@
 @page "/"
+@using Kinetic_A11y.Web2.Components.Common.StylizedHeader
+@using Kinetic_A11y.Web2.Web.Components.Common.StylizedHeader
 @using Kinetic
 
 @inject IDbContextFactory<DiscoveryDbContext> DbFactory
@@ -6,70 +8,125 @@
 @inject NavigationManager Navigation
 
 <PageTitle>Kinetic - a11y Website Discovery</PageTitle>
-<h1>Kinetic - a11y Website Discovery</h1>       
-<p class="muted">Enter a public website root URL to discover publicly linked PDF documents.</p>
+<div class="p-8">
+    <StylizedHeader HeaderLevel="HeaderLevel.H1" HeaderText="Kinetic - A11y Website Discovery"/>
+    <p class="text-sm">Enter a public website root URL to discover publicly linked PDF documents.</p>
 
-<div class="panel">
-    <label for="rootUrl">Root website URL</label>
-    <input id="rootUrl" @bind="rootUrl" placeholder="https://www.example.gov" />
-    <div class="settings">
-        <div><label for="depth">Max crawl depth</label><input id="depth" type="number" @bind="maxDepth" min="0" max="20" /></div>
-        <div><label for="pages">Max pages</label><input id="pages" type="number" @bind="maxPages" min="1" max="100000" /></div>
-    </div>
-    <label class="checkbox"><input type="checkbox" @bind="scanAccessibility" /> Scan accessibility and Best Practices (axe-core, WCAG A/AA)</label>
-    <label class="checkbox"><input id="renderJavaScript" type="checkbox" @bind="renderJavaScript" /> JavaScript-rendered scan (slower)</label>
-    @if (renderJavaScript)
-    {
-        <label for="jsWait">Wait after page load (seconds)</label>
-        <input id="jsWait" type="number" @bind="javaScriptWaitSeconds" min="0" max="60" />
-        <p class="muted">Chromium renders every page and waits before discovering links and checking accessibility, SEO, and broken links. Increase the wait for slow-loading content. This does not click buttons or guarantee that all background activity has finished.</p>
-    }
-    <p class="muted">SEO and HTTP(S) link checks run on every crawled HTML page, including external links. Scoring follows DubBot's published formula; check coverage differs.</p>
-    <button @onclick="StartAsync" disabled="@starting">@(starting ? "Starting..." : "Start discovery")</button>
-    @if (!string.IsNullOrWhiteSpace(error)) { <p class="error">@error</p> }
-</div>
+    <div class="mt-4">
+        <div class="form-group">
+            <label class="form-label" for="rootUrl">Root website URL</label>
+            <input class="form-control w-50" id="rootUrl" @bind="rootUrl" placeholder="https://www.example.gov"/>
+        </div>
+        <div class="form-group">
+            <label class="form-label" for="depth">Max crawl depth</label>
+            <input class="form-control w-50" id="depth" type="number" @bind="maxDepth" min="0" max="20"/>
+        </div>
 
-<h2>Recent discovery runs</h2>
-@if (runs is null) { <p>Loading...</p> }
-else if (runs.Count == 0) { <p class="muted">No discovery runs yet.</p> }
-else
-{
-    <table>
-        <thead><tr><th>Website</th><th>Status</th><th>Pages</th><th>PDFs</th><th>A11y score</th><th>Site score</th><th>Created</th><th></th></tr></thead>
-        <tbody>
-        @foreach (var run in runs)
+        <div class="form-group">
+            <label class="form-label" for="pages">Max pages</label>
+            <input class="form-control w-50" id="pages" type="number" @bind="maxPages" min="1" max="100000"/>
+        </div>
+
+        <div class="form-group">
+            <BbFormFieldCheckbox
+                InputClass="bg-white data-[state=checked]:bg-ocio-blue-500"
+                Label="Scan accessibility and Best Practices (axe-core, WCAG A/AA/AAA)"
+                @bind-Checked="scanAccessibility"/>
+        </div>
+
+        <div class="form-group">
+            <BbFormFieldCheckbox InputClass="bg-white data-[state=checked]:bg-ocio-blue-500"
+                Label="JavaScript-rendered scan (slower)"
+                                 @bind-Checked="renderJavaScript"/>
+            @if (renderJavaScript)
+            {
+                <label class="form-label mt-4" for="jsWait">Wait after page load (seconds)</label>
+                <input class="form-control mb-2 w-50" id="jsWait" type="number" @bind="javaScriptWaitSeconds" min="0" max="60"/>
+                <p class="text-sm">Chromium renders every page and waits before discovering links and checking accessibility, SEO, and broken links. Increase the wait for slow-loading content. This does not click buttons or guarantee that all background activity has finished.</p>
+            }
+
+        </div>
+
+
+        <button class="btn btn-primary mt-3 mb-6" @onclick="StartAsync" disabled="@starting">@(starting ? "Starting..." : "Start discovery")</button>
+        @if (!string.IsNullOrWhiteSpace(error))
         {
-            <tr>
-                <td>@run.RootUrl</td><td>@run.Status</td>
-                <td>@run.PagesCrawled / @run.PagesDiscovered</td>
-                <td>@run.PdfsDiscovered (@run.PdfsValidated valid)</td>
-                <td>
-                    @if (!run.ScanAccessibility) { <span class="muted">Off</span> }
+            <p class="error">@error</p>
+        }
+    </div>
+
+    <StylizedHeader HeaderLevel="HeaderLevel.H2" HeaderText="Recent Discovery Runs"/>
+   
+    <BbDataTable TData="DiscoveryRun" Data="runs" SelectionMode="DataTableSelectionMode.Multiple" ShowToolbar="false"
+                 InitialPageSize="25" PageSizes="[25, 50, 100]">
+        <Columns>
+            <BbDataTableColumn TData="DiscoveryRun" TValue="string" Property="@(t => t.RootUrl)" Header="Website" Sortable="true"/>
+
+            <BbDataTableColumn TData="DiscoveryRun" TValue="DiscoveryRunStatus" Property="@(t => t.Status)" Header="Status" Sortable="true" />
+
+            <BbDataTableColumn TData="DiscoveryRun" TValue="int" Property="@(t => t.PagesCrawled)" Header="Pages" Sortable="true">
+                <CellTemplate Context="run">
+                    <span>@run.PagesCrawled / @run.PagesDiscovered</span>
+                </CellTemplate>
+            </BbDataTableColumn>
+
+            <BbDataTableColumn TData="DiscoveryRun" TValue="int" Property="@(t => t.PdfsDiscovered)" Header="PDFs" Sortable="true">
+                <CellTemplate Context="run">
+                    <span>@run.PdfsDiscovered (@run.PdfsValidated valid)</span>
+                </CellTemplate>
+            </BbDataTableColumn>
+
+            <BbDataTableColumn TData="DiscoveryRun" TValue="Guid" Property="@(t => t.Id)" Header="A11y Score" Sortable="true">
+                <CellTemplate Context="run">
+                    @if (!run.ScanAccessibility)
+                    {
+                        <span>Off</span>
+                    }
                     else
                     {
                         var score = run.AverageAccessibilityScore is { } avg ? (int?)Math.Round(avg) : null;
                         <span class="score score-@AccessibilityScoring.Band(score)">@(score?.ToString() ?? "—")</span>
-                        @if (!qualitySummaries.ContainsKey(run.Id)) { <span class="muted">Legacy</span> }
+                        @if (!qualitySummaries.ContainsKey(run.Id))
+                        {
+                            <span class="muted">Legacy</span>
+                        }
                     }
-                </td>
-                <td>@(qualitySummaries.TryGetValue(run.Id, out var summary) ? summary.Overall?.ToString("0.#") ?? "N/A" : "N/A")</td>
-                <td>@run.CreatedAt.ToLocalTime().ToString("g")</td>
-                <td><a href="/runs/@run.Id">View</a></td>
-            </tr>
-        }
-        </tbody>
-    </table>
-}
+                </CellTemplate>
+            </BbDataTableColumn>
+            <BbDataTableColumn TData="DiscoveryRun" TValue="Guid" Property="@(t => t.Id)" Header="Site Score" Sortable="true">
+                <CellTemplate Context="run">
+                    @(qualitySummaries.TryGetValue(run.Id, out var summary) ? summary.Overall?.ToString("0.#") ?? "N/A" : "N/A")
+                </CellTemplate>
+            </BbDataTableColumn>
+            <BbDataTableColumn TData="DiscoveryRun" TValue="DateTimeOffset" Property="@(t => t.CreatedAt)" Header="Created" Sortable="true">
+                <CellTemplate Context="run">
+                    @run.CreatedAt.ToLocalTime().ToString("g")
+                </CellTemplate>
+            </BbDataTableColumn>
+            <BbDataTableColumn TData="DiscoveryRun" TValue="Guid" Property="@(t => t.Id)" Header="">
+                <CellTemplate Context="run">
+                    <a href="/runs/@run.Id">View</a>
+                </CellTemplate>
+            </BbDataTableColumn>
+        </Columns>
+        <EmptyTemplate>
+            <p class="bg-white p-8 text-center text-lg">No Data Available</p>
+        </EmptyTemplate>
+    </BbDataTable>
+   
+    
+</div>
+
 @code {
     private string rootUrl = "";
-    private int maxDepth = 5;
+    private int maxDepth = 10;
     private int maxPages = 2000;
     private bool scanAccessibility = true;
-    private bool renderJavaScript;
+    private bool renderJavaScript = true;
     private int javaScriptWaitSeconds = 2;
     private bool starting;
     private string? error;
-    private List<DiscoveryRun>? runs;
+    private List<DiscoveryRun> runs = [];
     private Dictionary<Guid, SiteQualitySummary> qualitySummaries = [];
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
@@ -87,7 +144,8 @@ else
 
     private async Task StartAsync()
     {
-        starting = true; error = null;
+        starting = true;
+        error = null;
         try
         {
             if (!Uri.TryCreate(rootUrl, UriKind.Absolute, out var uri) || uri.Scheme is not ("http" or "https"))
@@ -108,7 +166,14 @@ else
             await Queue.EnqueueAsync(run.Id);
             Navigation.NavigateTo($"/runs/{run.Id}");
         }
-        catch (Exception ex) { error = ex.Message; }
-        finally { starting = false; }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+        }
+        finally
+        {
+            starting = false;
+        }
     }
+
 }

@@ -60,7 +60,7 @@ else
         {
             <tr @key="pdf.Id">
                 <td>@pdf.FileName</td><td>@pdf.Status</td>
-                <td>@(pdf.FileSizeBytes.HasValue ? $"{pdf.FileSizeBytes.Value:N0} bytes" : "—")</td>
+                <td>@(pdf.FileSizeBytes.HasValue ? $"{pdf.FileSizeBytes.Value / 1_000_000d:N2} MB"  : "—")</td>
                 <td><a href="@pdf.SourcePageUrl" target="_blank" rel="noopener noreferrer">Source</a></td>
                 <td><a href="@pdf.Url" target="_blank" rel="noopener noreferrer">Open PDF</a></td>
             </tr>
