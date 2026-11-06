@@ -156,6 +156,23 @@ public sealed class DiscoveryDbContext(DbContextOptions<DiscoveryDbContext> opti
         finally { await Database.CloseConnectionAsync(); }
     }
 
+    /// <summary>Adds the WCAG level column to an existing accessibility violations table when absent.</summary>
+    public async Task EnsureWcagLevelSchemaAsync()
+    {
+        await Database.OpenConnectionAsync();
+        try
+        {
+            using var command = Database.GetDbConnection().CreateCommand();
+            command.CommandText = "PRAGMA table_info('AccessibilityViolations')";
+            var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            await using (var reader = await command.ExecuteReaderAsync())
+                while (await reader.ReadAsync()) columns.Add(reader.GetString(1));
+            if (!columns.Contains(nameof(AccessibilityViolation.WcagLevel)))
+                await Database.ExecuteSqlRawAsync("ALTER TABLE AccessibilityViolations ADD COLUMN WcagLevel TEXT NULL");
+        }
+        finally { await Database.CloseConnectionAsync(); }
+    }
+
     /// <summary>Creates the additive page-quality results table and its unique run/URL index if needed.</summary>
     public Task EnsureQualitySchemaAsync() => Database.ExecuteSqlRawAsync("""
         CREATE TABLE IF NOT EXISTS "PageQualityResults" (
